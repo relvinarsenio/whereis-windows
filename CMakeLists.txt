@@ -155,6 +155,33 @@ if(BUILD_TESTING)
         WIN32_LEAN_AND_MEAN
     )
 
+    if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        target_compile_options(whereis_unicode_test PRIVATE
+            /W4
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+            /EHsc
+        )
+        if(WHEREIS_WARNINGS_AS_ERRORS)
+            target_compile_options(whereis_unicode_test PRIVATE /WX)
+        endif()
+    else()
+        target_compile_options(whereis_unicode_test PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wconversion
+            -Wsign-conversion
+            -Wshadow
+            -Wformat=2
+        )
+        if(WHEREIS_WARNINGS_AS_ERRORS)
+            target_compile_options(whereis_unicode_test PRIVATE -Werror)
+        endif()
+    endif()
+
     add_test(
         NAME whereis.utf16
         COMMAND "$<TARGET_FILE:whereis_unicode_test>" "$<TARGET_FILE:whereis>"
