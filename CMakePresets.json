@@ -1,0 +1,68 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release",
+      "description": "Optimized build. Uses the generator's normal build layout and configuration selection.",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "WHEREIS_BUILD_PROFILE": "Release",
+        "BUILD_TESTING": "ON",
+        "WHEREIS_ENABLE_IPO": "ON",
+        "WHEREIS_ENABLE_HARDENING": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "description": "Development build. Uses a separate build directory and enables tests and hardening.",
+      "binaryDir": "${sourceDir}/build-debug",
+      "cacheVariables": {
+        "WHEREIS_BUILD_PROFILE": "Debug",
+        "BUILD_TESTING": "ON",
+        "WHEREIS_ENABLE_IPO": "OFF",
+        "WHEREIS_ENABLE_HARDENING": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "displayName": "Build Release",
+      "configurePreset": "release",
+      "configuration": "Release"
+    },
+    {
+      "name": "debug",
+      "displayName": "Build Debug",
+      "configurePreset": "debug",
+      "configuration": "Debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "displayName": "Test Release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Test Debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
