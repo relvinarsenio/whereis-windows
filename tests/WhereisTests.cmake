@@ -75,7 +75,13 @@ endfunction()
 # Help and command-line errors.
 
 run_whereis(0 "help" --help)
-assert_contains("${WHEREIS_OUTPUT}" "Usage: whereis" "--help prints usage")
+assert_contains("${WHEREIS_OUTPUT}" "Usage: whereis [-abmqsuxh]" "help synopsis lists supported short options")
+assert_contains("${WHEREIS_OUTPUT}" "whereis --help" "help synopsis documents --help")
+assert_contains("${WHEREIS_OUTPUT}" "-h, --help" "help documents both help options")
+assert_contains("${WHEREIS_OUTPUT}" "Stop option processing" "help documents --")
+
+run_whereis(0 "short help option" -h)
+assert_contains("${WHEREIS_OUTPUT}" "Usage: whereis" "-h prints usage")
 
 run_whereis(64 "no arguments")
 assert_contains("${WHEREIS_ERROR}" "No program names" "missing query is a usage error")
@@ -125,7 +131,7 @@ pass("-a returns all binary matches")
 
 # Both command-line arguments and redirected output use Unicode-safe paths.
 
-set(_unicode_dir "${WHEREIS_TEST_ROOT}/unicode-路径")
+set(_unicode_dir "${WHEREIS_TEST_ROOT}/unicode 路径")
 
 file(MAKE_DIRECTORY "${_unicode_dir}")
 file(WRITE "${_unicode_dir}/工具.exe" "test")
@@ -135,6 +141,41 @@ run_whereis(0 "Unicode query and path"
 
 assert_contains("${WHEREIS_OUTPUT}" "工具.exe"
     "Unicode query and filename are preserved")
+
+set(_unicode_output_file "${WHEREIS_TEST_ROOT}/unicode-output.bin")
+execute_process(
+    COMMAND "${WHEREIS_EXE}" -q -b -B "${_unicode_dir}" -f 工具
+    RESULT_VARIABLE _unicode_result
+    OUTPUT_FILE "${_unicode_output_file}"
+    ERROR_VARIABLE _unicode_error
+    TIMEOUT 20
+)
+if(NOT "${_unicode_result}" STREQUAL "0")
+    message(FATAL_ERROR "Unicode redirected-output test failed: ${_unicode_error}")
+endif()
+
+file(READ "${_unicode_output_file}" _unicode_hex HEX)
+string(TOLOWER "${_unicode_hex}" _unicode_hex)
+string(HEX "工具.exe" _unicode_filename_hex)
+string(HEX "unicode 路径" _unicode_directory_hex)
+string(TOLOWER "${_unicode_filename_hex}" _unicode_filename_hex)
+string(TOLOWER "${_unicode_directory_hex}" _unicode_directory_hex)
+
+if(NOT _unicode_hex MATCHES "${_unicode_filename_hex}")
+    message(FATAL_ERROR
+        "Redirected output does not contain the filename as UTF-8. Bytes: ${_unicode_hex}")
+endif()
+if(NOT _unicode_hex MATCHES "${_unicode_directory_hex}")
+    message(FATAL_ERROR
+        "Redirected output does not contain the directory as UTF-8. Bytes: ${_unicode_hex}")
+endif()
+if(NOT _unicode_hex MATCHES "0a$" OR _unicode_hex MATCHES "0d0a$")
+    message(FATAL_ERROR "Unicode redirected output must end with LF, not CRLF. Bytes: ${_unicode_hex}")
+endif()
+if(_unicode_hex MATCHES "efbfbd")
+    message(FATAL_ERROR "Valid Unicode output unexpectedly contains U+FFFD. Bytes: ${_unicode_hex}")
+endif()
+pass("redirected Unicode paths are encoded as UTF-8")
 
 # Quiet output.
 
@@ -222,8 +263,8 @@ assert_contains("${WHEREIS_OUTPUT}" "cmd:" "-ab cluster is accepted")
 run_whereis(0 "-abf cluster" -abf cmd)
 assert_contains("${WHEREIS_OUTPUT}" "cmd:" "-abf cluster is accepted")
 
-run_whereis(0 "-af cluster" -af cmd)
-assert_contains("${WHEREIS_OUTPUT}" "cmd:" "-af cluster is accepted")
+run_whereis(0 "-baf cluster" -baf cmd)
+assert_contains("${WHEREIS_OUTPUT}" "cmd:" "-baf cluster is accepted")
 
 run_whereis(0 "-aB cluster"
     -aB "${_binary_one}" -f whereis-cmake-foo-1.2)

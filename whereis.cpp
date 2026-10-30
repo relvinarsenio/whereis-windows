@@ -994,7 +994,8 @@ namespace whereis {
 	void print_usage(bool to_stderr = false) {
 		constexpr std::wstring_view help_text =
 			L"whereis-windows - locate executables, documentation, and source directories\n"
-			L"Usage: whereis [-abmqsux] [-B dir ...] [-M dir ...] [-S dir ... -f] name ...\n\n"
+			L"Usage: whereis [-abmqsuxh] [-B dir ...] [-M dir ...] [-S dir ... -f] name ...\n"
+			L"       whereis --help\n\n"
 			L"  -a  Find all matches instead of the first match in each category\n"
 			L"  -b  Search for executable files (PATH, PATHEXT, and App Paths)\n"
 			L"  -m  Search manual pages and documentation (MANPATH)\n"
@@ -1006,7 +1007,8 @@ namespace whereis {
 			L"  -q  Do not print the program name label\n"
 			L"  -u  Print only names missing at least one requested category\n"
 			L"  -x  Skip recursive source discovery\n"
-			L"  -h  Show this help\n\n"
+			L"  -h, --help  Show this help\n"
+			L"  --          Stop option processing; treat remaining arguments as program names\n\n"
 			L"Directory lists use Windows' semicolon separator. Quote paths containing spaces.\n"
 			L"When no category is selected, -bms is assumed.\n";
 		if (to_stderr) ConsoleOutput::stderr_text(help_text);

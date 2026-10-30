@@ -146,7 +146,7 @@ root\docs\
 root\share\man\
 ```
 
-It checks section directories `man1` through `man9`, as well as `man1p` and `man3p`, and also checks for pages placed directly in a layout directory. Common compressed suffixes are recognized. Common standalone documentation formats such as Markdown, HTML, PDF, plain text, reStructuredText, and AsciiDoc are also searched.
+It checks section directories `man1` through `man9`, as well as `man1p` and `man3p`, and also checks for pages placed directly in a layout directory. Compressed manual-page suffixes include `.bz2`, `.gz`, `.lzma`, `.xz`, `.z`, `.Z`, and `.zst`. Common standalone documentation formats such as Markdown, HTML, PDF, plain text, reStructuredText, and AsciiDoc are also searched.
 
 This is a filesystem search. It does not invoke a Unix `man` command or reproduce the formatting and section-selection rules of a complete `man` implementation.
 
@@ -471,6 +471,7 @@ The acceptance suite creates an isolated temporary test tree and checks:
 
 - Help output, missing arguments, and unknown options.
 - Executable names containing dots, paths containing spaces, and Unicode queries/filenames.
+- Raw UTF-8 bytes for redirected Unicode paths, plus replacement handling for malformed UTF-16 filenames.
 - `-a`, `-q`, clustered options, `-f`, and `--`.
 - `PATHEXT` handling and custom binary directories.
 - BSD-style `-u` behavior.

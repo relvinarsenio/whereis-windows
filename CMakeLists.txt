@@ -146,6 +146,25 @@ install(FILES README.md LICENSE
 )
 
 if(BUILD_TESTING)
+    add_executable(whereis_unicode_test tests/UnicodeTest.cpp)
+    target_compile_features(whereis_unicode_test PRIVATE cxx_std_23)
+    target_compile_definitions(whereis_unicode_test PRIVATE
+        UNICODE
+        _UNICODE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+    )
+
+    add_test(
+        NAME whereis.utf16
+        COMMAND "$<TARGET_FILE:whereis_unicode_test>" "$<TARGET_FILE:whereis>"
+    )
+    set_tests_properties(whereis.utf16 PROPERTIES
+        LABELS "windows;acceptance;unicode"
+        TIMEOUT 30
+        RUN_SERIAL TRUE
+    )
+
     find_program(WHEREIS_WHERE_EXE NAMES where.exe)
 
     add_test(
