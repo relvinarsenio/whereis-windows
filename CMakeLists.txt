@@ -187,6 +187,7 @@ if(BUILD_TESTING)
         COMMAND "$<TARGET_FILE:whereis_unicode_test>" "$<TARGET_FILE:whereis>"
     )
     set_tests_properties(whereis.utf16 PROPERTIES
+        SKIP_RETURN_CODE 77
         LABELS "windows;acceptance;unicode"
         TIMEOUT 30
         RUN_SERIAL TRUE
