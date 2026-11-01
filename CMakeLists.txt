@@ -239,6 +239,7 @@ if(BUILD_TESTING)
 
     target_link_libraries(whereis_unit_test PRIVATE GTest::gtest_main Advapi32)
 
+    include(GoogleTest)
     gtest_discover_tests(whereis_unit_test
         DISCOVERY_TIMEOUT 15
         PROPERTIES
@@ -246,7 +247,6 @@ if(BUILD_TESTING)
             TIMEOUT 30
     )
 
-    include(GoogleTest)
     gtest_discover_tests(whereis_unicode_test
         DISCOVERY_TIMEOUT 15
         PROPERTIES
