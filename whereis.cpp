@@ -1015,6 +1015,7 @@ template <SearchBackend Binary, SearchBackend Manual, SearchBackend Source>
 
 } // namespace whereis
 
+#ifndef WHEREIS_UNIT_TEST
 int wmain(int argc, wchar_t* argv[]) {
     std::vector<std::wstring_view> arguments;
     const auto argument_count = static_cast<std::size_t>(std::max(argc - 1, 0));
@@ -1035,3 +1036,4 @@ int wmain(int argc, wchar_t* argv[]) {
     whereis::configure_directories(options);
     return whereis::run(options);
 }
+#endif

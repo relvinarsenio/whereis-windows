@@ -198,6 +198,55 @@ if(BUILD_TESTING)
 
     target_link_libraries(whereis_unicode_test PRIVATE GTest::gtest_main)
 
+
+    # Compile the implementation into this test translation unit so internal
+    # functions and searcher classes can be tested without a public test API.
+    add_executable(whereis_unit_test tests/WhereisUnitTest.cpp)
+    target_compile_features(whereis_unit_test PRIVATE cxx_std_23)
+    target_compile_definitions(whereis_unit_test PRIVATE
+        UNICODE
+        _UNICODE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+    )
+
+    if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        target_compile_options(whereis_unit_test PRIVATE
+            /W4
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+            /EHsc
+        )
+        if(WHEREIS_WARNINGS_AS_ERRORS)
+            target_compile_options(whereis_unit_test PRIVATE /WX)
+        endif()
+    else()
+        target_compile_options(whereis_unit_test PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wconversion
+            -Wsign-conversion
+            -Wshadow
+            -Wformat=2
+        )
+        if(WHEREIS_WARNINGS_AS_ERRORS)
+            target_compile_options(whereis_unit_test PRIVATE -Werror)
+        endif()
+    endif()
+
+    target_link_libraries(whereis_unit_test PRIVATE GTest::gtest_main)
+
+    include(GoogleTest)
+    gtest_discover_tests(whereis_unit_test
+        DISCOVERY_TIMEOUT 15
+        PROPERTIES
+            LABELS "windows;unit;internal"
+            TIMEOUT 30
+    )
+
     include(GoogleTest)
     gtest_discover_tests(whereis_unicode_test
         DISCOVERY_TIMEOUT 15
