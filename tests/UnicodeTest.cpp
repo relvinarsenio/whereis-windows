@@ -13,9 +13,8 @@
 
 #include <array>
 #include <cstddef>
-#include <exception>
 #include <filesystem>
-#include <iostream>
+#include <gtest/gtest.h>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -27,10 +26,6 @@ namespace {
 
 static_assert(sizeof(wchar_t) == sizeof(char16_t));
 
-constexpr int exit_pass = 0;
-constexpr int exit_fail = 1;
-constexpr int exit_skip = 77;
-
 constexpr DWORD process_timeout_ms = 15'000;
 
 constexpr std::wstring_view invalid_filename_prefix = L"whereis-invalid-";
@@ -38,11 +33,6 @@ constexpr std::wstring_view invalid_filename_prefix = L"whereis-invalid-";
 constexpr std::wstring_view invalid_filename_suffix = L".exe";
 
 constexpr std::string_view expected_name_utf8 = "whereis-invalid-\xEF\xBF\xBD.exe";
-
-class TestSkipped : public std::runtime_error {
-public:
-    using std::runtime_error::runtime_error;
-};
 
 class UniqueHandle {
 public:
@@ -133,10 +123,6 @@ private:
     const auto error = GetLastError();
 
     throw std::system_error { static_cast<int>(error), std::system_category(), std::string { operation } };
-}
-
-void require(bool condition, std::string_view message) {
-    if (!condition) { throw std::runtime_error { std::string { message } }; }
 }
 
 [[nodiscard]] UniqueHandle open_file(
@@ -274,14 +260,32 @@ void append_quoted_argument(std::wstring& command_line, std::wstring_view argume
 
     const auto contents = read_all(output.get());
 
-    if (exit_code != exit_pass) {
+    if (exit_code != 0) {
         throw std::runtime_error { "whereis returned exit code " + std::to_string(exit_code) + "\n" + contents };
     }
 
     return contents;
 }
 
-void run_test(const std::filesystem::path& whereis_executable) {
+[[nodiscard]] std::filesystem::path whereis_executable() {
+    constexpr wchar_t variable[] = L"WHEREIS_EXE";
+
+    const DWORD required = GetEnvironmentVariableW(variable, nullptr, 0);
+    if (required == 0) {
+        throw std::runtime_error { "WHEREIS_EXE is not set." };
+    }
+
+    std::wstring value(required, L'\0');
+    const DWORD written = GetEnvironmentVariableW(variable, value.data(), required);
+    if (written == 0 || written >= required) { throw_last_error("GetEnvironmentVariableW"); }
+
+    value.resize(written);
+    return std::filesystem::path { std::move(value) };
+}
+
+} // namespace
+
+TEST(UnicodeOutput, ReplacesUnpairedUtf16SurrogateWithReplacementCharacter) {
     TemporaryDirectory directory;
 
     std::wstring query { invalid_filename_prefix };
@@ -291,59 +295,30 @@ void run_test(const std::filesystem::path& whereis_executable) {
     const auto fixture_path = directory.path() / query;
 
     try {
-        auto fixture = open_file(fixture_path, GENERIC_WRITE, 0, CREATE_NEW, false);
+        [[maybe_unused]] auto fixture = open_file(fixture_path, GENERIC_WRITE, 0, CREATE_NEW, false);
     } catch (const std::system_error& error) {
         if (error.code().category() == std::system_category() && error.code().value() == ERROR_INVALID_NAME) {
-            throw TestSkipped { "the filesystem rejects filenames containing "
-                                "unpaired UTF-16 surrogates" };
+            GTEST_SKIP() << "The filesystem rejects filenames containing unpaired UTF-16 surrogates.";
         }
 
         throw;
     }
 
-    const auto contents = run_whereis(whereis_executable, directory.path(), query);
+    const auto contents = run_whereis(whereis_executable(), directory.path(), query);
 
-    require(!contents.empty() && contents.back() == '\n', "redirected output does not end with LF");
-
-    require(contents.find('\n') == contents.size() - 1, "expected exactly one output line");
-
-    require(contents.find('\r') == std::string::npos, "redirected output unexpectedly contains CR");
+    ASSERT_FALSE(contents.empty());
+    ASSERT_EQ(contents.back(), '\n');
+    ASSERT_EQ(contents.find('\n'), contents.size() - 1);
+    ASSERT_EQ(contents.find('\r'), std::string::npos);
 
     const auto line = std::string_view { contents }.substr(0, contents.size() - 1);
 
     const auto separator = line.find(": ");
-
-    require(separator != std::string_view::npos, "whereis output does not contain the expected name separator");
+    ASSERT_NE(separator, std::string_view::npos);
 
     const auto label       = line.substr(0, separator);
     const auto result_path = line.substr(separator + 2);
 
-    require(label == expected_name_utf8, "query label is not the expected U+FFFD-replaced name");
-
-    require(result_path.find(expected_name_utf8) != std::string_view::npos,
-        "result path does not contain the expected U+FFFD-replaced name");
-}
-
-} // namespace
-
-int wmain(int argc, wchar_t* argv[]) {
-    if (argc != 2) {
-        std::cerr << "[FAIL] expected the path to whereis.exe\n";
-        return exit_fail;
-    }
-
-    try {
-        run_test(std::filesystem::path { argv[1] });
-
-        std::cout << "[PASS] malformed UTF-16 is replaced with UTF-8 U+FFFD "
-                  << "in the query label and result path\n";
-
-        return exit_pass;
-    } catch (const TestSkipped& skipped) {
-        std::cout << "[SKIP] " << skipped.what() << '\n';
-        return exit_skip;
-    } catch (const std::exception& error) {
-        std::cerr << "[FAIL] " << error.what() << '\n';
-        return exit_fail;
-    }
+    EXPECT_EQ(label, expected_name_utf8);
+    EXPECT_NE(result_path.find(expected_name_utf8), std::string_view::npos);
 }

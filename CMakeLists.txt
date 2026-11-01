@@ -146,6 +146,20 @@ install(FILES README.md LICENSE
 )
 
 if(BUILD_TESTING)
+    include(FetchContent)
+
+    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    set(gtest_build_tests OFF CACHE BOOL "" FORCE)
+    set(gtest_build_samples OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG 063de7e9578f82b369302001269680b4b1553359
+    )
+    FetchContent_MakeAvailable(googletest)
+
     add_executable(whereis_unicode_test tests/UnicodeTest.cpp)
     target_compile_features(whereis_unicode_test PRIVATE cxx_std_23)
     target_compile_definitions(whereis_unicode_test PRIVATE
@@ -182,15 +196,16 @@ if(BUILD_TESTING)
         endif()
     endif()
 
-    add_test(
-        NAME whereis.utf16
-        COMMAND "$<TARGET_FILE:whereis_unicode_test>" "$<TARGET_FILE:whereis>"
-    )
-    set_tests_properties(whereis.utf16 PROPERTIES
-        SKIP_RETURN_CODE 77
-        LABELS "windows;acceptance;unicode"
-        TIMEOUT 30
-        RUN_SERIAL TRUE
+    target_link_libraries(whereis_unicode_test PRIVATE GTest::gtest_main)
+
+    include(GoogleTest)
+    gtest_discover_tests(whereis_unicode_test
+        DISCOVERY_TIMEOUT 15
+        PROPERTIES
+            LABELS "windows;integration;unicode"
+            TIMEOUT 30
+            SKIP_REGULAR_EXPRESSION "SKIPPED"
+            ENVIRONMENT "WHEREIS_EXE=$<TARGET_FILE:whereis>"
     )
 
     find_program(WHEREIS_WHERE_EXE NAMES where.exe)
