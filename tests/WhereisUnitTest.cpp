@@ -9,10 +9,9 @@
  *
  */
 
-#include <gtest/gtest.h>
-
 #include <array>
 #include <fstream>
+#include <gtest/gtest.h>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -49,7 +48,7 @@ public:
         throw std::runtime_error { "could not allocate a unique temporary directory" };
     }
 
-    TemporaryDirectory(const TemporaryDirectory&) = delete;
+    TemporaryDirectory(const TemporaryDirectory&)            = delete;
     TemporaryDirectory& operator=(const TemporaryDirectory&) = delete;
 
     ~TemporaryDirectory() {
@@ -76,9 +75,7 @@ void write_file(const fs::path& path) {
     std::wstring value(required, L'\0');
     const DWORD written = GetEnvironmentVariableW(key.c_str(), value.data(), required);
     if (written == 0 || written >= required) {
-        throw std::system_error {
-            static_cast<int>(GetLastError()), std::system_category(), "GetEnvironmentVariableW"
-        };
+        throw std::system_error { static_cast<int>(GetLastError()), std::system_category(), "GetEnvironmentVariableW" };
     }
 
     value.resize(written);
@@ -91,18 +88,15 @@ public:
         : name_ { std::move(name) }
         , previous_ { get_environment(name_) } {
         if (!SetEnvironmentVariableW(name_.c_str(), value ? value->c_str() : nullptr)) {
-            throw std::system_error {
-                static_cast<int>(GetLastError()), std::system_category(), "SetEnvironmentVariableW"
-            };
+            throw std::system_error { static_cast<int>(GetLastError()), std::system_category(),
+                "SetEnvironmentVariableW" };
         }
     }
 
-    ScopedEnvironmentVariable(const ScopedEnvironmentVariable&) = delete;
+    ScopedEnvironmentVariable(const ScopedEnvironmentVariable&)            = delete;
     ScopedEnvironmentVariable& operator=(const ScopedEnvironmentVariable&) = delete;
 
-    ~ScopedEnvironmentVariable() {
-        SetEnvironmentVariableW(name_.c_str(), previous_ ? previous_->c_str() : nullptr);
-    }
+    ~ScopedEnvironmentVariable() { SetEnvironmentVariableW(name_.c_str(), previous_ ? previous_->c_str() : nullptr); }
 
 private:
     std::wstring name_;
@@ -161,9 +155,8 @@ TEST(ArgumentParser, EnablesAvailableCategoriesWhenNoneAreSelected) {
 }
 
 TEST(ArgumentParser, TreatsArgumentsAfterDoubleDashAsNames) {
-    const std::array arguments {
-        std::wstring_view { L"-b" }, std::wstring_view { L"--" }, std::wstring_view { L"-example" }
-    };
+    const std::array arguments { std::wstring_view { L"-b" }, std::wstring_view { L"--" },
+        std::wstring_view { L"-example" } };
     const auto parsed = whereis::parse_arguments(std::span<const std::wstring_view> { arguments });
 
     ASSERT_TRUE(parsed.has_value());
@@ -179,8 +172,7 @@ TEST(ArgumentParser, RejectsUnknownOptionsAndMissingDirectories) {
     EXPECT_NE(unknown.error().find(L"Unknown option"), std::wstring::npos);
 
     const std::array directory_arguments { std::wstring_view { L"-B" } };
-    const auto missing_directory
-        = whereis::parse_arguments(std::span<const std::wstring_view> { directory_arguments });
+    const auto missing_directory = whereis::parse_arguments(std::span<const std::wstring_view> { directory_arguments });
 
     ASSERT_FALSE(missing_directory.has_value());
     EXPECT_NE(missing_directory.error().find(L"requires at least one directory"), std::wstring::npos);
@@ -188,7 +180,7 @@ TEST(ArgumentParser, RejectsUnknownOptionsAndMissingDirectories) {
 
 TEST(ArgumentParser, SplitsAndDeduplicatesCustomDirectoryLists) {
     TemporaryDirectory temporary;
-    const auto first = temporary.path() / L"bin";
+    const auto first  = temporary.path() / L"bin";
     const auto second = temporary.path() / L"tools";
     fs::create_directories(first);
     fs::create_directories(second);
@@ -198,10 +190,8 @@ TEST(ArgumentParser, SplitsAndDeduplicatesCustomDirectoryLists) {
     directories.append(second.native());
     directories.push_back(L';');
 
-    const std::array arguments {
-        std::wstring_view { L"-B" }, std::wstring_view { directories }, std::wstring_view { L"-f" },
-        std::wstring_view { L"clang" }
-    };
+    const std::array arguments { std::wstring_view { L"-B" }, std::wstring_view { directories },
+        std::wstring_view { L"-f" }, std::wstring_view { L"clang" } };
     const auto parsed = whereis::parse_arguments(std::span<const std::wstring_view> { arguments });
 
     ASSERT_TRUE(parsed.has_value());
@@ -270,10 +260,10 @@ TEST(OutputFormatting, PrintsAnEmptyResultLabelUnlessQuiet) {
 
 TEST(SearchOrchestration, SetsMissingBitsForCategoriesWithoutMatches) {
     whereis::Options options;
-    options.binaries = true;
-    options.manuals = true;
-    options.sources = true;
-    options.all = true;
+    options.binaries             = true;
+    options.manuals              = true;
+    options.sources              = true;
+    options.all                  = true;
     options.no_recursive_sources = true;
 
     const FixedSearcher binaries { { fs::path { L"C:\\bin\\clang.exe" } } };
@@ -319,7 +309,7 @@ TEST(ManualSearcher, FindsACompressedSectionedManualPage) {
 
 TEST(SourceSearcher, HandlesDirectRecursiveAndDisabledRecursiveLookup) {
     TemporaryDirectory temporary;
-    const auto direct = temporary.path() / L"unit-direct";
+    const auto direct    = temporary.path() / L"unit-direct";
     const auto recursive = temporary.path() / L"nested" / L"repository" / L"unit-recursive";
     fs::create_directories(direct);
     fs::create_directories(recursive);

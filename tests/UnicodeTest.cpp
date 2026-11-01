@@ -271,9 +271,7 @@ void append_quoted_argument(std::wstring& command_line, std::wstring_view argume
     constexpr wchar_t variable[] = L"WHEREIS_EXE";
 
     const DWORD required = GetEnvironmentVariableW(variable, nullptr, 0);
-    if (required == 0) {
-        throw std::runtime_error { "WHEREIS_EXE is not set." };
-    }
+    if (required == 0) { throw std::runtime_error { "WHEREIS_EXE is not set." }; }
 
     std::wstring value(required, L'\0');
     const DWORD written = GetEnvironmentVariableW(variable, value.data(), required);
