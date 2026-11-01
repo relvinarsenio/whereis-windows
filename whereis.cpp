@@ -59,7 +59,6 @@ constexpr int data_error            = 65;
 constexpr unsigned no_binary        = 1u << 0;
 constexpr unsigned no_manual        = 1u << 1;
 constexpr unsigned no_source        = 1u << 2;
-constexpr unsigned max_source_depth = 8;
 
 constexpr std::array default_path_extensions { std::wstring_view { L".COM" }, std::wstring_view { L".EXE" },
     std::wstring_view { L".BAT" }, std::wstring_view { L".CMD" }, std::wstring_view { L".VBS" },
@@ -795,13 +794,10 @@ private:
             end = fs::recursive_directory_iterator {};
             !error && current != end; current.increment(error)) {
             const auto entry_path = current->path();
-            const auto depth      = current.depth();
             std::error_code type_error;
             const bool directory = current->is_directory(type_error);
 
-            if (depth >= static_cast<int>(max_source_depth) || should_prune(entry_path.filename())) {
-                current.disable_recursion_pending();
-            }
+            if (should_prune(entry_path.filename())) { current.disable_recursion_pending(); }
 
             if (!type_error && directory && equal_ordinal(entry_path.filename().native(), name)) {
                 append_unique_path(matches, entry_path);

@@ -309,8 +309,13 @@ TEST(ManualSearcher, FindsACompressedSectionedManualPage) {
 
 TEST(SourceSearcher, HandlesDirectRecursiveAndDisabledRecursiveLookup) {
     TemporaryDirectory temporary;
-    const auto direct    = temporary.path() / L"unit-direct";
-    const auto recursive = temporary.path() / L"nested" / L"repository" / L"unit-recursive";
+    const auto direct = temporary.path() / L"unit-direct";
+    auto recursive = temporary.path();
+    for (unsigned int level = 0; level < 10; ++level) {
+        recursive /= L"nested";
+    }
+    recursive /= L"unit-recursive";
+
     fs::create_directories(direct);
     fs::create_directories(recursive);
 
