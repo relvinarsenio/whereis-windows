@@ -299,7 +299,7 @@ TEST(BinarySearcher, FindsAnExecutableInTheProvidedDirectory) {
     const auto matches = searcher.find({ L"unit-tool", false, false });
 
     ASSERT_EQ(matches.size(), 1u);
-    EXPECT_TRUE(whereis::same_path(matches.front(), executable));
+    EXPECT_TRUE(whereis::same_path(matches.front(), whereis::canonical_case(executable)));
 }
 
 TEST(ManualSearcher, FindsACompressedSectionedManualPage) {
