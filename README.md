@@ -1,38 +1,48 @@
 # whereis for Windows
 
-`whereis` is a Windows implementation of the FreeBSD `whereis(1)` utility.
-It locates executables, manual pages and documentation, and source directories.
+`whereis` locates executable files, manual pages and documentation, and source directories on Windows.
 
-It keeps the familiar command-line interface while adapting the search behavior to Windows paths, environment variables, and Registry locations.
+It is derived from the FreeBSD `whereis(1)` utility and keeps its command-line interface and output format.
+The search implementation is adapted for Windows.
 
 ## Contents
 
 - [Overview](#overview)
 - [Installation](#installation)
 - [Usage](#usage)
-- [Search Behavior](#search-behavior)
-- [Output and Exit Status](#output-and-exit-status)
-- [Compatibility and Limitations](#compatibility-and-limitations)
-- [Building and Testing](#building-and-testing)
-- [Credits and License](#credits-and-license)
+- [Search behavior](#search-behavior)
+- [Output and exit status](#output-and-exit-status)
+- [Differences and limitations](#differences-and-limitations)
+- [Building and testing](#building-and-testing)
+- [Credits and license](#credits-and-license)
 
 ## Overview
 
 `whereis` searches three categories:
 
-- **Binaries** — executables, scripts, and Windows application execution aliases.
-- **Manuals** — man pages and standalone documentation files.
-- **Sources** — directories named after the requested program.
+- Binaries: executable files, scripts, and Windows application execution aliases.
+- Manuals: man pages and standalone documentation files.
+- Sources: directories named after the requested program.
 
-Try it:
+Run `whereis` with a program name to search the available categories:
 
 ```powershell
 whereis.exe pwsh
+```
+
+Use `-b` to search for binaries only:
+
+```powershell
 whereis.exe -b python winget wt
+```
+
+Display the usage information:
+
+```powershell
 whereis.exe --help
 ```
 
-Without a category option, `whereis` searches every category with an available search location.
+When no category option is specified, `whereis` searches each category with an available search root.
 
 ## Installation
 
@@ -62,14 +72,15 @@ $env:Path = "$InstallDir;$env:Path"
 ```
 
 Open a new terminal to use the updated `PATH`.
-Verify the installation with:
+
+Verify the installation:
 
 ```powershell
 where.exe whereis
 whereis.exe -b whereis
 ```
 
-To uninstall, delete the installation directory and remove it from the user `PATH`.
+To uninstall, delete the installation directory and remove its entry from the user `PATH`.
 
 ## Usage
 
@@ -83,31 +94,39 @@ whereis --help
 Single-letter options can be combined.
 For example, `-ab` is equivalent to `-a -b`.
 
+The directory options `-B`, `-M`, and `-S` must appear at the end of an option cluster.
+For example, use `-aB` rather than `-Ba`.
+
+A directory list ends when another directory option appears, or when `-f` or `--` appears.
+Use `-f` to end the last directory list and begin the program names.
+
 ### Options
 
 | Option | Description |
 |---|---|
-| `-a` | Print all matches instead of the first match in each category. |
+| `-a` | Print all matches in each enabled category instead of the first match. |
 | `-b` | Search for binaries. |
 | `-m` | Search for manuals and documentation. |
 | `-s` | Search for source directories. |
-| `-B directory ...` | Use these directories as binary search roots. |
-| `-M directory ...` | Use these directories as manual search roots. |
-| `-S directory ...` | Use these directories as source search roots. |
+| `-B directory ...` | Search the given directories for binaries. |
+| `-M directory ...` | Search the given directories for manuals and documentation. |
+| `-S directory ...` | Search the given directories for source directories. |
 | `-f` | End the directory lists. Remaining arguments are program names. |
 | `-q` | Omit the `name:` label and print only paths. |
 | `-u` | Print only names for which an enabled category has no match. |
-| `-x` | Skip recursive source searches. Direct child checks are still performed. |
-| `-h`, `--help` | Print usage information. |
-| `--` | Stop option processing. Following arguments are treated as names. |
+| `-x` | Skip recursive source searches. Direct child directory checks still run. |
+| `-h`, `--help` | Print usage information and exit. |
+| `--` | End option processing. Following arguments are treated as program names. |
 
-The directory options replace the default roots for their respective categories; they do not add to them.
+The `-B`, `-M`, and `-S` options replace the default search roots for their respective categories.
 
-Directory arguments may contain multiple paths separated by semicolons (`;`).
-A directory list ends when another directory option is encountered, or when `-f` or `--` is used.
+Each directory argument can contain multiple paths separated by semicolons (`;`).
 
-Quote paths containing spaces.
-In `cmd.exe`, avoid ending a quoted path with a backslash.
+Quote paths that contain spaces.
+In PowerShell, use single or double quotes.
+In `cmd.exe`, use double quotes.
+Avoid a trailing backslash before the closing quotation mark because the sequence `\"` is interpreted as a literal quotation mark.
+
 For example, use `"C:\Program Files\LLVM\bin"` rather than `"C:\Program Files\LLVM\bin\"`.
 
 ### Examples
@@ -118,13 +137,13 @@ Search all available categories:
 whereis.exe clang
 ```
 
-Search only for binaries:
+Search for binaries:
 
 ```powershell
 whereis.exe -b clang git cmake
 ```
 
-Print every binary match without the name label:
+Print all binary matches without the name label:
 
 ```powershell
 whereis.exe -q -a -b pwsh
@@ -136,7 +155,7 @@ Search custom binary directories:
 whereis.exe -B 'C:\Program Files\LLVM\bin;D:\Tools\bin' -f clang
 ```
 
-Search manual pages from an MSYS2 installation:
+Search the manual pages of an MSYS2 installation:
 
 ```powershell
 whereis.exe -m -M 'C:\msys64\usr\share\man' -f bash
@@ -148,68 +167,92 @@ Search source directories without recursion:
 whereis.exe -s -x -S 'D:\src;C:\Users\me\source\repos' -f openssl
 ```
 
-Use different roots for multiple categories:
+Search multiple categories with custom roots:
 
 ```powershell
 whereis.exe -B 'C:\Tools;D:\Apps\bin' -M 'C:\msys64\usr\share\man' -S 'D:\src' -f git clang
 ```
 
-Find names that have no binary match:
+Print names that have no binary match:
 
 ```powershell
 whereis.exe -u -b git cmake nonexistent-program
 ```
 
-Search for a name beginning with a hyphen:
+Search for a name that begins with a hyphen:
 
 ```powershell
 whereis.exe -b -- -example
 ```
 
+## Search behavior
 
-## Search Behavior
+### Category selection
 
-### Category Selection
+When no category option is specified, `whereis` enables all three categories that have usable search roots.
 
-If no category option is specified, all three categories are enabled when they have usable search roots.
+Windows has no standard locations for manual pages or source trees.
+`whereis` skips a category when it has no default search root.
+An explicitly selected category requires at least one search directory.
 
-Windows does not provide standard locations for manual pages or source trees.
-A category without a default search root is skipped.
-Selecting such a category explicitly with `-b`, `-m`, or `-s` requires at least one search directory.
+### Name handling
 
-### Binary Search
+If a program name contains a path, `whereis` uses its final component.
 
-Binary search follows this order:
+Before searching, `whereis` removes these compression suffixes from the name:
 
-1. Directories listed in `PATH`.
+```text
+.bz2  .zst  .lzma  .gz  .xz  .Z  .z
+```
+
+### Binary search
+
+`whereis` searches for binaries in this order:
+
+1. Each directory in `PATH`, in order.
 2. The Windows system directory, normally `C:\Windows\System32`.
 3. The Windows directory.
-4. Registry **App Paths** entries.
+4. Registry App Paths entries.
 
 Within each directory, `whereis` tries the extensions listed in `PATHEXT`.
-If `PATHEXT` is unavailable, a built-in list of common executable and script extensions is used.
+When `PATHEXT` is unset, `whereis` uses a built-in list of common executable and script extensions.
 Names that already have a recognized executable extension are tried as given.
 
-App Paths is used as a fallback after directory searches.
-`HKEY_CURRENT_USER` is checked before `HKEY_LOCAL_MACHINE`, using both the 64-bit and 32-bit Registry views.
-The default value of the following entry is used when it points to an existing file:
+App Paths provides a fallback after directory searches.
+For each candidate name, `whereis` checks `HKEY_CURRENT_USER` before `HKEY_LOCAL_MACHINE`.
+It reads both the 64-bit and 32-bit Registry views.
+
+The default value of this Registry entry supplies the executable path:
 
 ```text
 Software\Microsoft\Windows\CurrentVersion\App Paths\<name>.exe
 ```
 
-Windows application execution aliases, such as those in `%LOCALAPPDATA%\Microsoft\WindowsApps`, are also considered when searching for executables.
+`whereis` uses the entry when it points to an existing file.
 
-The current directory is not searched automatically.
-Use `-B .` to search it as a custom binary root.
+Windows application execution aliases, such as those in `%LOCALAPPDATA%\Microsoft\WindowsApps`, are included in binary searches.
 
-### Manual Pages and Documentation
+The current directory is not a default binary search root.
+Use `-B .` to include it as a custom root.
 
-If `MANPATH` is set, its directories are used as manual roots.
+`whereis` preserves the file-name case stored in the filesystem.
 
-Otherwise, roots are detected from common Windows development environments:
+### Manual pages and documentation
 
-- Directories relative to `bin` entries in `PATH`, including `share\man` locations.
+When `MANPATH` is set, `whereis` uses its directories as manual roots.
+
+Otherwise, it derives roots from common Windows development environments.
+
+For each `PATH` entry whose directory name is `bin`, it checks these locations relative to that entry:
+
+```text
+..\share\man
+..\usr\share\man
+..\..\usr\share\man
+```
+
+It also checks:
+
 - `usr\share\man` below `MSYS2_ROOT`, `CYGWIN_ROOT`, and `GIT_INSTALL_ROOT`.
 - `Git\usr\share\man` below `ProgramFiles` and `ProgramFiles(x86)`.
 
@@ -223,138 +266,171 @@ root\docs\
 root\share\man\
 ```
 
-Man pages are searched by section, from `1` through `9`, including `1p` and `3p`.
-Both `manN\name.section` and files placed directly in a layout directory are considered.
+For a page named `name.section`, `whereis` checks both `manN\name.section` and the layout directory itself.
+The supported sections are `1` through `9`, `1p`, and `3p`.
 
-Supported man-page suffixes include `.gz`, `.bz2`, `.xz`, `.zst`, `.html`, and `.htm`.
+A manual page can have no suffix or one of these suffixes:
 
-Standalone documentation can use `.md`, `.markdown`, `.html`, `.htm`, `.pdf`, `.txt`, `.rst`, or `.adoc`.
+```text
+.gz  .bz2  .xz  .zst  .html  .htm
+```
 
-This is a filesystem search.
-`whereis` does not run `man` or format manual pages.
+`whereis` also searches for standalone documentation files in each layout directory.
+Supported extensions are `.md`, `.markdown`, `.html`, `.htm`, `.pdf`, `.txt`, `.rst`, and `.adoc`.
 
-### Source Directories
+`whereis` searches the filesystem.
+It does not run `man` or apply its formatting and section-selection rules.
 
-Each source root is first checked for a direct child directory with the requested name.
+### Source directories
 
-Unless `-x` is specified, the search continues recursively.
-Traversal is limited to eight directory levels and skips the contents of common generated or version-control directories, including:
+`whereis` checks each source root for a direct child directory with the requested name.
+
+Unless `-x` is specified, it also searches below each root.
+The search descends at most eight directory levels.
+It skips the contents of these directories:
 
 ```text
 .git  .hg  .svn  .vs  .cache
 node_modules  packages  build  out  obj
 ```
 
-Default source roots come from:
+The default source roots come from `SRCPATH` and `PORTSDIR`, along with these locations:
 
-- `SRCPATH` and `PORTSDIR`.
-- `%VCPKG_ROOT%\ports`, when present.
-- Common source locations below `%USERPROFILE%`, including `source`, `source\repos`, `src`, `Documents\source`, `Documents\GitHub`, and Visual Studio project directories.
-- `src` and `source` below `%SystemDrive%`, when present.
+- `%VCPKG_ROOT%\ports`, when the directory exists.
+- `source`, `source\repos`, and `src` below `%USERPROFILE%`.
+- `Documents\source` and `Documents\GitHub` below `%USERPROFILE%`.
+- `Documents\Visual Studio 2022\Projects` and `Documents\Visual Studio 2026\Projects` below `%USERPROFILE%`.
+- `src` and `source` below `%SystemDrive%`, when those directories exist.
 
-### Environment Variables
+The `-S` option replaces these default roots.
+
+### Environment variables
 
 Directory lists use semicolons (`;`) as separators.
-`%NAME%` references are expanded, and a leading `~` represents `%USERPROFILE%`.
+`whereis` expands `%NAME%` references in directory arguments and environment variable values.
+A leading `~` represents `%USERPROFILE%`.
 
-| Variable | Purpose |
-|---|---|
-| `PATH` | Binary search directories and the basis for detecting some manual roots. |
-| `PATHEXT` | Executable and script extensions. |
-| `MANPATH` | Manual and documentation roots. |
-| `SRCPATH` | Source search roots. |
-| `PORTSDIR` | Additional source roots. |
-| `VCPKG_ROOT` | Adds its `ports` directory as a source root. |
-| `USERPROFILE` | Base for default per-user source locations. |
-| `SystemDrive` | Base for default `src` and `source` locations. |
-| `MSYS2_ROOT`, `CYGWIN_ROOT`, `GIT_INSTALL_ROOT` | Used to locate manual pages. |
-| `ProgramFiles`, `ProgramFiles(x86)` | Used to locate Git manual pages. |
+| Variable | Used for | Description |
+|---|---|---|
+| `PATH` | Binaries and manuals | Binary search directories. `whereis` also uses `bin` entries to locate default manual roots. |
+| `PATHEXT` | Binaries | Extensions that `whereis` appends when searching for executable files. |
+| `MANPATH` | Manuals | Manual page and documentation roots. |
+| `SRCPATH` | Sources | Source search roots. |
+| `PORTSDIR` | Sources | Additional source roots. |
+| `VCPKG_ROOT` | Sources | Adds its `ports` directory as a source root. |
+| `USERPROFILE` | Sources | Base directory for default per-user source locations. |
+| `SystemDrive` | Sources | Base directory for default `src` and `source` locations. |
+| `MSYS2_ROOT`, `CYGWIN_ROOT`, `GIT_INSTALL_ROOT` | Manuals | Used to locate `usr\share\man`. |
+| `ProgramFiles`, `ProgramFiles(x86)` | Manuals | Used to locate Git manual pages. |
 
-## Output and Exit Status
+## Output and exit status
 
 ### Output
 
-Each program name produces one output line:
+`whereis` prints one line for each program name:
 
 ```text
 name: binary-path manual-path source-path
 ```
 
-Only paths that were found are printed.
-If nothing is found, the name and colon are still printed unless `-q` is used:
+The line contains the paths that `whereis` finds.
+When no path matches, it prints the name and colon:
 
 ```text
 name:
 ```
 
-Paths containing spaces or tabs are enclosed in double quotes.
+The `-q` option omits the name label.
+`whereis` encloses paths that contain spaces or tabs in double quotes.
 
-Output encoding depends on where standard output is directed:
+The output format depends on the destination of standard output:
 
-- **Console:** Unicode text with CR LF line endings.
-- **File or pipe:** UTF-8 text with LF line endings.
+- Console output uses Unicode text and CR LF line endings.
+- Redirected output uses UTF-8 and LF line endings.
 
-Malformed UTF-16 file names are written using replacement characters.
+When a file name contains malformed UTF-16, `whereis` writes replacement characters.
 
-### Exit Status
+### Exit status
 
 | Status | Meaning |
 |---:|---|
-| `0` | The command completed. A name that was not found is not an error. |
+| `0` | The command completed. An unmatched name does not produce an error. |
 | `64` | Usage error, such as an unknown option or missing program name. |
 | `65` | No usable category or search directory. |
 
 Statuses `64` and `65` correspond to `EX_USAGE` and `EX_DATAERR` in `sysexits.h`.
 
-## Compatibility and Limitations
+## Differences and limitations
 
 ### Differences from FreeBSD
 
-The Windows implementation keeps the familiar interface and output format, but search behavior differs where Windows has no direct equivalent.
+The Windows implementation follows the FreeBSD command-line interface and output format.
+The search behavior differs where Windows uses different filesystem and command-discovery conventions.
 
 | Area | FreeBSD | Windows |
 |---|---|---|
 | Binary search roots | `user.cs_path`, `/usr/libexec`, then `PATH` | `PATH`, system directory, Windows directory, then App Paths |
 | Executable check | Regular file with an execute bit | Existing file with an extension from `PATHEXT` |
 | Manual search | Runs `man -w` | Searches the filesystem |
-| Source search | Fixed source locations and `locate` fallback | Configured roots and bounded recursive search |
-| Name matching | Case-sensitive | Case-insensitive |
-| Name stripping | Leading path, `s.` prefix, `,v` suffix, and compression suffixes | Leading path and compression suffixes |
-| Directory separator | `:` | `;` |
+| Source search | Fixed `/usr/src` locations and `/usr/ports` subdirectories, with a `locate` fallback | Configured roots and bounded directory search |
+| Case sensitivity | Case-sensitive | Case-insensitive |
+| Name stripping | Leading path, `s.` prefix, `,v` suffix, `.z`, `.Z`, `.gz`, and `.bz2` | Leading path and `.bz2`, `.zst`, `.lzma`, `.gz`, `.xz`, `.Z`, and `.z` |
+| Directory list separator | `:` | `;` |
 | Paths with spaces | Printed as is | Enclosed in double quotes |
 | Help option | None | `-h`, `--help` |
 
-The exit status for an unsuccessful search, including values `64` and `65`, follows the FreeBSD utility.
-
 ### Limitations
 
-`whereis` locates files and directories.
-It does not reproduce shell command resolution.
+`whereis` searches files and directories.
+It does not resolve commands through a shell.
 
-- PowerShell aliases, functions, and cmdlets are not resolved.
-  Use `Get-Command` for those.
-- AppX package manifests are not read.
-  An application execution alias is found only when its file exists in a searched directory.
-- App Paths entries may become outdated when applications move or are updated.
-- The current directory is not searched unless specified explicitly.
-- `.ps1` scripts are found only when `.PS1` is included in `PATHEXT`.
-- Manual and source results depend on the available search roots.
-  An installed program is not guaranteed to have a manual or source result.
-- Recursive source searches may find unrelated directories with the same name.
-  Use `-b` to search only for binaries or `-x` to skip recursion.
-- Directories at the recursion limit and excluded directories are still checked by name, but their contents are not searched.
+- PowerShell aliases, functions, and cmdlets are outside its search scope. Use `Get-Command` to locate them.
+- `whereis` does not read AppX package manifests. It finds an application execution alias when its file exists in a searched directory.
+- App Paths entries can point to locations that change after an application update.
+- The current directory is not searched unless it appears in a search root.
+- `whereis` finds `.ps1` scripts only when `.PS1` appears in `PATHEXT`.
+- Manual and source results depend on the configured or detected roots. An installed program may have no matching manual page or source directory.
+- A recursive source search can find an unrelated directory with the requested name. Use `-b` to search only for binaries or `-x` to skip recursion.
+- At the recursion limit, and in excluded directories, `whereis` checks the directory name but does not search its contents.
 
-Redirected output is UTF-8.
-Windows PowerShell 5.1 may decode native UTF-8 output using a legacy code page, causing non-ASCII paths to appear incorrectly.
-Set the output encoding before running the command:
+### PowerShell output
+
+`whereis` writes redirected output as UTF-8.
+PowerShell may decode native program output using a different encoding, which can corrupt non-ASCII paths.
+
+Check the encoding PowerShell uses to read native output:
+
+```powershell
+[Console]::OutputEncoding.CodePage
+```
+
+If the code page does not match UTF-8, set the console output encoding before running `whereis`:
 
 ```powershell
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 ```
 
-PowerShell redirection also varies by version: Windows PowerShell 5.1 uses UTF-16LE, PowerShell 7.0–7.3 uses UTF-8 without a BOM, and PowerShell 7.4 and later preserve the native byte stream.
+The `$OutputEncoding` variable controls the encoding PowerShell uses when sending data to native programs.
+It does not control how PowerShell reads their output.
 
-## Building and Testing
+PowerShell redirection also depends on the version:
+
+| PowerShell version | Redirected native output |
+|---|---|
+| Windows PowerShell 5.1 | UTF-16LE |
+| PowerShell 7.0 through 7.3 | UTF-8 without a byte order mark |
+| PowerShell 7.4 and later | Preserves the original byte stream |
+
+PowerShell 7.4 and later preserve the byte stream when redirecting native standard output directly to a file.
+This behavior does not apply when stderr is merged into stdout with `2>&1`, because PowerShell treats the combined streams as text.
+
+To preserve the UTF-8 bytes when using older PowerShell versions, redirect through `cmd.exe`:
+
+```powershell
+cmd /c "whereis.exe -b pwsh > out.txt"
+```
+
+## Building and testing
 
 ### Requirements
 
@@ -365,49 +441,68 @@ PowerShell redirection also varies by version: Windows PowerShell 5.1 uses UTF-1
 
 ### Build
 
-Build the Release configuration using the provided CMake preset:
+Build the Release configuration with the provided CMake preset:
 
 ```powershell
 cmake --preset release
 cmake --build --preset release
+ctest --preset release
 ```
 
 A `debug` preset is also available.
+It builds in `build-debug`.
 
-The presets use CMake's default generator.
-To use Ninja, for example:
+CMake presets do not select a generator, architecture, or toolset.
+CMake uses its default generator unless `CMAKE_GENERATOR` specifies another.
+
+Set `CMAKE_GENERATOR` to use Ninja:
 
 ```powershell
 $env:CMAKE_GENERATOR = 'Ninja'
 cmake --preset release
 ```
 
-Run the build from a Developer PowerShell or another environment where the compiler and Windows SDK are available.
+Run the build from Developer PowerShell or another environment with the compiler and Windows SDK available.
 
-With a multi-configuration generator such as Visual Studio, the executable is produced under `build\Release`.
-With a single-configuration generator such as Ninja, it is produced under `build`.
+With a multi-configuration generator such as Visual Studio, the executable is located at:
 
-To install the executable using CMake:
+```text
+build\Release\whereis.exe
+```
+
+With a single-configuration generator such as Ninja, the executable is located at:
+
+```text
+build\whereis.exe
+```
+
+When building without presets and using a multi-configuration generator, pass `--config Release` to `cmake --build` and `-C Release` to `ctest`.
+Otherwise, CMake uses the default configuration, which is commonly Debug.
+
+Install the executable with CMake:
 
 ```powershell
 cmake --install build --config Release --prefix "$env:LOCALAPPDATA/Programs/whereis"
 ```
 
-The executable is installed as `bin\whereis.exe` below the chosen prefix.
+CMake installs the executable as `bin\whereis.exe` below the selected prefix.
 
-### Build Options
+### Build options
 
 | Option | Default | Description |
 |---|---:|---|
 | `BUILD_TESTING` | `ON` | Enable the CTest acceptance suite. |
 | `WHEREIS_BUILD_PROFILE` | `Release` | Default build type for single-configuration generators when `CMAKE_BUILD_TYPE` is not set. |
-| `WHEREIS_ENABLE_IPO` | `ON` | Enable link-time optimization for Release builds when supported. |
-| `WHEREIS_ENABLE_HARDENING` | `ON` | Enable supported hardening options, including SDL and Control Flow Guard for MSVC. |
+| `WHEREIS_ENABLE_IPO` | `ON` | Enable link-time optimization for Release builds when the toolchain supports it. |
+| `WHEREIS_ENABLE_HARDENING` | `ON` | Enable supported hardening options. MSVC uses SDL and Control Flow Guard; GCC and Clang use stack protection. |
 | `WHEREIS_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings as errors. |
 
 ### Testing
 
-Run the acceptance tests with CTest:
+The acceptance tests use a CMake script that CTest runs.
+They do not require PowerShell.
+
+Run the tests with the Release preset:
 
 ```powershell
 ctest --preset release
@@ -419,23 +514,35 @@ Or specify the build directory and configuration:
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The tests use an isolated temporary directory tree and cover command-line parsing, binary discovery, manual and source searches, Unicode names, output encoding, and common search results.
+The tests create an isolated temporary directory tree and check:
 
-Comparisons with `where.exe` are skipped when the corresponding command is not installed.
+- Help output, a missing program name, and unknown options.
+- Names containing dots, paths containing spaces, and Unicode names.
+- UTF-8 output and replacement of malformed UTF-16 file names.
+- `-a`, `-q`, `-u`, `-x`, option clusters, `-f`, and `--`.
+- `PATHEXT` handling and custom binary directories.
+- Sectioned manual pages and standalone documentation.
+- Direct and recursive source searches.
+- LF line endings in redirected output.
+- Agreement between the first result and `where.exe` for common commands, including `pwsh`, `python`, `winget`, `wt`, `find`, and `sort`.
 
-## Credits and License
+The `where.exe` comparison is skipped when a command is not installed.
+All other tests are mandatory.
 
-### See Also
+## Credits and license
 
-- `where.exe /?` — Windows command-line file locator.
-- `Get-Command` — PowerShell command discovery.
-- [`whereis(1)`](https://man.freebsd.org/cgi/man.cgi?query=whereis&sektion=1) — FreeBSD manual page.
+### See also
+
+- `where.exe /?` for the Windows command-line file locator.
+- `Get-Command` for PowerShell command discovery.
+- [`whereis(1)`](https://man.freebsd.org/cgi/man.cgi?query=whereis&sektion=1) for the FreeBSD manual page.
 
 ### History
 
-The original FreeBSD `whereis` was written by Jörg Wunsch in 2002 as a rewrite preserving the interface of the 4.3BSD utility.
+Jörg Wunsch wrote the original FreeBSD `whereis` in 2002 as a rewrite that preserves the interface of the 4.3BSD utility.
 
-The Windows port was written by Alfie Ardinata. It retains the original command-line interface and output format while adapting the search to Windows.
+Alfie Ardinata wrote the Windows port.
+It retains the original command-line interface and output format while adapting the search to Windows.
 
 ### License
 
