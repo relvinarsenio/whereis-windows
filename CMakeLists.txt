@@ -237,9 +237,8 @@ if(BUILD_TESTING)
         endif()
     endif()
 
-    target_link_libraries(whereis_unit_test PRIVATE GTest::gtest_main)
+    target_link_libraries(whereis_unit_test PRIVATE GTest::gtest_main Advapi32)
 
-    include(GoogleTest)
     gtest_discover_tests(whereis_unit_test
         DISCOVERY_TIMEOUT 15
         PROPERTIES
