@@ -499,9 +499,8 @@ CMake installs the executable as `bin\whereis.exe` below the selected prefix.
 
 ### Testing
 
-The CTest suite contains a GoogleTest integration test for malformed UTF-16 filenames and a CMake-script acceptance test.
-CMake fetches a pinned GoogleTest revision during configuration, so no separate installation is required.
-The initial configure step requires network access to GitHub unless GoogleTest is already populated in the build tree.
+The acceptance tests use a CMake script that CTest runs.
+They do not require PowerShell.
 
 Run the tests with the Release preset:
 
@@ -528,7 +527,7 @@ The tests create an isolated temporary directory tree and check:
 - Agreement between the first result and `where.exe` for common commands, including `pwsh`, `python`, `winget`, `wt`, `find`, and `sort`.
 
 The `where.exe` comparison is skipped when a command is not installed.
-The malformed UTF-16 test is skipped when the filesystem rejects unpaired surrogate filenames.
+All other tests are mandatory.
 
 ## Credits and license
 
