@@ -54,11 +54,11 @@ namespace fs = std::filesystem;
 
 namespace whereis {
 
-constexpr int usage_error           = 64;
-constexpr int data_error            = 65;
-constexpr unsigned no_binary        = 1u << 0;
-constexpr unsigned no_manual        = 1u << 1;
-constexpr unsigned no_source        = 1u << 2;
+constexpr int usage_error    = 64;
+constexpr int data_error     = 65;
+constexpr unsigned no_binary = 1u << 0;
+constexpr unsigned no_manual = 1u << 1;
+constexpr unsigned no_source = 1u << 2;
 
 constexpr std::array default_path_extensions { std::wstring_view { L".COM" }, std::wstring_view { L".EXE" },
     std::wstring_view { L".BAT" }, std::wstring_view { L".CMD" }, std::wstring_view { L".VBS" },
@@ -862,58 +862,77 @@ static_assert(SearchBackend<SourceSearcher>);
 
 class ConsoleOutput {
 public:
-    static void stdout_text(std::wstring_view text) noexcept { write(GetStdHandle(STD_OUTPUT_HANDLE), text); }
-
-    static void stderr_text(std::wstring_view text) noexcept { write(GetStdHandle(STD_ERROR_HANDLE), text); }
+    static void stdout_text(std::wstring_view text) { write(GetStdHandle(STD_OUTPUT_HANDLE), text); }
+    static void stderr_text(std::wstring_view text) { write(GetStdHandle(STD_ERROR_HANDLE), text); }
 
 private:
-    static void write(HANDLE handle, std::wstring_view text) noexcept {
+    struct ConsoleSink {};
+    struct RedirectedSink {};
+
+    static constexpr DWORD console_chunk = 32768;
+
+    static void write(HANDLE handle, std::wstring_view text) {
         if (handle == nullptr || handle == INVALID_HANDLE_VALUE || text.empty()) { return; }
 
-        DWORD console_mode {};
-        if (GetConsoleMode(handle, &console_mode)) {
-            std::wstring console_text;
-            if (text.find(L'\n') != std::wstring_view::npos) {
-                console_text.reserve(text.size() + 8);
-                wchar_t previous {};
-                for (const wchar_t character : text) {
-                    if (character == L'\n' && previous != L'\r') { console_text.push_back(L'\r'); }
-                    console_text.push_back(character);
-                    previous = character;
-                }
-                text = console_text;
-            }
-
-            auto remaining = text;
-            while (!remaining.empty()) {
-                const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(remaining.size(), 32768));
-                DWORD written {};
-                if (!WriteConsoleW(handle, remaining.data(), chunk, &written, nullptr) || written == 0) { return; }
-                remaining.remove_prefix(written);
-            }
-            return;
+        DWORD mode {};
+        if (GetConsoleMode(handle, &mode)) {
+            emit(ConsoleSink {}, handle, text);
+        } else {
+            emit(RedirectedSink {}, handle, text);
         }
+    }
 
-        const int source_length
-            = static_cast<int>(std::min<std::size_t>(text.size(), static_cast<std::size_t>(INT_MAX)));
-        // Flags 0 permit replacement of malformed UTF-16 instead of dropping
-        // the entire output line when a filename contains a lone surrogate.
-        const int required = WideCharToMultiByte(CP_UTF8, 0, text.data(), source_length, nullptr, 0, nullptr, nullptr);
-        if (required <= 0) { return; }
+    static void emit(ConsoleSink, HANDLE handle, std::wstring_view text) {
+        const std::wstring converted = with_crlf(text);
+        write_all<wchar_t>(converted, console_chunk, [handle](const wchar_t* data, DWORD count, DWORD* written) {
+            return WriteConsoleW(handle, data, count, written, nullptr);
+        });
+    }
+
+    static void emit(RedirectedSink, HANDLE handle, std::wstring_view text) {
+        const std::string bytes = to_utf8(text);
+        write_all<char>(bytes, MAXDWORD, [handle](const char* data, DWORD count, DWORD* written) {
+            return WriteFile(handle, data, count, written, nullptr);
+        });
+    }
+
+    template <typename Char, typename WriteSome>
+        requires requires(WriteSome& fn, const Char* data, DWORD count, DWORD* written) {
+            { fn(data, count, written) } -> std::convertible_to<bool>;
+        }
+    static void write_all(std::basic_string_view<Char> data, DWORD max_chunk, WriteSome write_some) {
+        while (!data.empty()) {
+            const auto chunk { static_cast<DWORD>(std::min<std::size_t>(data.size(), max_chunk)) };
+            DWORD written {};
+            if (!write_some(data.data(), chunk, &written) || written == 0) { return; }
+            data.remove_prefix(written);
+        }
+    }
+
+    // WriteConsoleW does not translate LF to CRLF.
+    static std::wstring with_crlf(std::wstring_view text) {
+        std::wstring result;
+        result.reserve(text.size() + 8);
+        wchar_t previous {};
+        for (const wchar_t character : text) {
+            if (character == L'\n' && previous != L'\r') { result.push_back(L'\r'); }
+            result.push_back(character);
+            previous = character;
+        }
+        return result;
+    }
+
+    // Flags = 0 replaces invalid UTF-16 sequences with U+FFFD.
+    // WideCharToMultiByte accepts an int source length.
+    static std::string to_utf8(std::wstring_view text) {
+        const int length   = static_cast<int>(std::min<std::size_t>(text.size(), INT_MAX));
+        const int required = WideCharToMultiByte(CP_UTF8, 0, text.data(), length, nullptr, 0, nullptr, nullptr);
+        if (required <= 0) { return {}; }
 
         std::string utf8(static_cast<std::size_t>(required), '\0');
         const int converted
-            = WideCharToMultiByte(CP_UTF8, 0, text.data(), source_length, utf8.data(), required, nullptr, nullptr);
-        if (converted <= 0) { return; }
-
-        auto remaining = std::string_view { utf8 };
-        while (!remaining.empty()) {
-            const DWORD chunk
-                = static_cast<DWORD>(std::min<std::size_t>(remaining.size(), static_cast<std::size_t>(MAXDWORD)));
-            DWORD written {};
-            if (!WriteFile(handle, remaining.data(), chunk, &written, nullptr) || written == 0) { return; }
-            remaining.remove_prefix(written);
-        }
+            = WideCharToMultiByte(CP_UTF8, 0, text.data(), length, utf8.data(), required, nullptr, nullptr);
+        return converted > 0 ? utf8 : std::string {};
     }
 };
 
