@@ -281,8 +281,6 @@ void append_quoted_argument(std::wstring& command_line, std::wstring_view argume
     return std::filesystem::path { std::move(value) };
 }
 
-} // namespace
-
 TEST(UnicodeOutput, ReplacesUnpairedUtf16SurrogateWithReplacementCharacter) {
     TemporaryDirectory directory;
 
@@ -320,3 +318,5 @@ TEST(UnicodeOutput, ReplacesUnpairedUtf16SurrogateWithReplacementCharacter) {
     EXPECT_EQ(label, expected_name_utf8);
     EXPECT_NE(result_path.find(expected_name_utf8), std::string_view::npos);
 }
+
+} // namespace

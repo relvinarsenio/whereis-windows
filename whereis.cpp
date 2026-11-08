@@ -37,6 +37,7 @@
 #include <array>
 #include <climits>
 #include <concepts>
+#include <cstring>
 #include <expected>
 #include <filesystem>
 #include <optional>
@@ -52,7 +53,7 @@
 
 namespace fs = std::filesystem;
 
-namespace whereis {
+namespace {
 
 constexpr int usage_error    = 64;
 constexpr int data_error     = 65;
@@ -112,6 +113,11 @@ struct SearchResult {
     unsigned missing {};
 };
 
+constexpr auto simple_flags = std::array { std::pair { L'a', &Options::all }, std::pair { L'b', &Options::binaries },
+    std::pair { L'm', &Options::manuals }, std::pair { L'q', &Options::quiet }, std::pair { L's', &Options::sources },
+    std::pair { L'u', &Options::unusual }, std::pair { L'x', &Options::no_recursive_sources },
+    std::pair { L'h', &Options::help } };
+
 template <typename T>
 concept SearchBackend = requires(const T& backend, const SearchRequest& request) {
     { backend.find(request) } -> std::same_as<std::vector<fs::path>>;
@@ -165,7 +171,7 @@ concept SearchBackend = requires(const T& backend, const SearchRequest& request)
     const DWORD written = ExpandEnvironmentStringsW(source.c_str(), expanded.data(), required);
     if (written == 0 || written > required) { return source; }
 
-    expanded.resize(written - 1);
+    expanded.resize(static_cast<std::size_t>(written) - 1);
     return expanded;
 }
 
@@ -197,9 +203,9 @@ concept SearchBackend = requires(const T& backend, const SearchRequest& request)
 }
 
 [[nodiscard]] bool same_path(const fs::path& left, const fs::path& right) {
-    const auto a = without_trailing_separator(left).native();
-    const auto b = without_trailing_separator(right).native();
-    return equal_ordinal(a, b);
+    const auto a = without_trailing_separator(left);
+    const auto b = without_trailing_separator(right);
+    return equal_ordinal(a.native(), b.native());
 }
 
 void append_unique_path(std::vector<fs::path>& paths, const fs::path& candidate) {
@@ -251,9 +257,12 @@ private:
     std::vector<fs::path> paths_;
 };
 
+[[nodiscard]] constexpr auto find_simple_flag(wchar_t flag) noexcept {
+    return std::ranges::find(simple_flags, flag, &decltype(simple_flags)::value_type::first);
+}
+
 [[nodiscard]] bool is_simple_flag(wchar_t flag) noexcept {
-    constexpr std::wstring_view flags { L"abmqsuxh" };
-    return flags.find(flag) != std::wstring_view::npos;
+    return find_simple_flag(flag) != simple_flags.end();
 }
 
 [[nodiscard]] bool is_flag_cluster(std::wstring_view argument) noexcept {
@@ -283,32 +292,8 @@ private:
 }
 
 void apply_simple_flag(Options& options, wchar_t flag) {
-    switch (flag) {
-        case L'a':
-            options.all = true;
-            break;
-        case L'b':
-            options.binaries = true;
-            break;
-        case L'm':
-            options.manuals = true;
-            break;
-        case L'q':
-            options.quiet = true;
-            break;
-        case L's':
-            options.sources = true;
-            break;
-        case L'u':
-            options.unusual = true;
-            break;
-        case L'x':
-            options.no_recursive_sources = true;
-            break;
-        case L'h':
-            options.help = true;
-            break;
-    }
+    const auto it = find_simple_flag(flag);
+    if (it != simple_flags.end()) { options.*it->second = true; }
 }
 
 [[nodiscard]] std::expected<Options, std::wstring> parse_arguments(std::span<const std::wstring_view> arguments) {
@@ -632,13 +617,21 @@ private:
                 continue;
             }
 
-            std::vector<BYTE> storage(bytes + sizeof(wchar_t));
-            const LONG read_status = RegQueryValueExW(key.get(), nullptr, nullptr, &type, storage.data(), &bytes);
+            const DWORD buffer_size = bytes;
+            std::vector<BYTE> storage(buffer_size);
+            DWORD read_bytes       = buffer_size;
+            const LONG read_status = RegQueryValueExW(key.get(), nullptr, nullptr, &type, storage.data(), &read_bytes);
+
             if (read_status != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) { continue; }
 
-            const auto* characters = reinterpret_cast<const wchar_t*>(storage.data());
-            const auto count       = bytes / sizeof(wchar_t);
-            std::wstring value { characters, count };
+            if (read_bytes < sizeof(wchar_t) || read_bytes > buffer_size || read_bytes % sizeof(wchar_t) != 0) {
+                continue;
+            }
+
+            const auto character_count = static_cast<std::size_t>(read_bytes / sizeof(wchar_t));
+            std::wstring value(character_count, L'\0');
+            std::memcpy(value.data(), storage.data(), static_cast<std::size_t>(read_bytes));
+
             while (!value.empty() && value.back() == L'\0') {
                 value.pop_back();
             }
@@ -793,7 +786,7 @@ private:
             = fs::recursive_directory_iterator { root, fs::directory_options::skip_permission_denied, error },
             end = fs::recursive_directory_iterator {};
             !error && current != end; current.increment(error)) {
-            const auto entry_path = current->path();
+            const auto& entry_path = current->path();
             std::error_code type_error;
             const bool directory = current->is_directory(type_error);
 
@@ -822,8 +815,32 @@ static_assert(SearchBackend<BinarySearcher>);
 static_assert(SearchBackend<ManualSearcher>);
 static_assert(SearchBackend<SourceSearcher>);
 
+template <SearchBackend Binary, SearchBackend Manual, SearchBackend Source>
+[[nodiscard]] SearchResult search_one(std::wstring_view name, const Options& options, const Binary& binaries,
+    const Manual& manuals, const Source& sources) {
+    const SearchRequest request { .name = name, .all = options.all, .skip_recursive = options.no_recursive_sources };
+    SearchResult result;
+
+    if (options.binaries) {
+        result.binaries = binaries.find(request);
+        if (result.binaries.empty()) { result.missing |= no_binary; }
+    }
+
+    if (options.manuals) {
+        result.manuals = manuals.find(request);
+        if (result.manuals.empty()) { result.missing |= no_manual; }
+    }
+
+    if (options.sources) {
+        result.sources = sources.find(request);
+        if (result.sources.empty()) { result.missing |= no_source; }
+    }
+
+    return result;
+}
+
 [[nodiscard]] std::wstring quote_path(const fs::path& path) {
-    auto value = path.native();
+    const auto& value = path.native();
     if (value.find_first_of(L" \t") == std::wstring::npos) { return value; }
 
     std::wstring quoted;
@@ -963,30 +980,6 @@ void print_usage(bool to_stderr = false) {
     }
 }
 
-template <SearchBackend Binary, SearchBackend Manual, SearchBackend Source>
-[[nodiscard]] SearchResult search_one(std::wstring_view name, const Options& options, const Binary& binaries,
-    const Manual& manuals, const Source& sources) {
-    const SearchRequest request { .name = name, .all = options.all, .skip_recursive = options.no_recursive_sources };
-    SearchResult result;
-
-    if (options.binaries) {
-        result.binaries = binaries.find(request);
-        if (result.binaries.empty()) { result.missing |= no_binary; }
-    }
-
-    if (options.manuals) {
-        result.manuals = manuals.find(request);
-        if (result.manuals.empty()) { result.missing |= no_manual; }
-    }
-
-    if (options.sources) {
-        result.sources = sources.find(request);
-        if (result.sources.empty()) { result.missing |= no_source; }
-    }
-
-    return result;
-}
-
 [[nodiscard]] int run(const Options& options) {
     if (options.help) {
         print_usage();
@@ -1028,7 +1021,7 @@ template <SearchBackend Binary, SearchBackend Manual, SearchBackend Source>
     return 0;
 }
 
-} // namespace whereis
+} // namespace
 
 #ifndef WHEREIS_UNIT_TEST
 int wmain(int argc, wchar_t* argv[]) {
@@ -1040,15 +1033,15 @@ int wmain(int argc, wchar_t* argv[]) {
         arguments.emplace_back(argument);
     }
 
-    auto parsed = whereis::parse_arguments(arguments);
+    auto parsed = parse_arguments(arguments);
     if (!parsed) {
-        whereis::ConsoleOutput::stderr_text(L"whereis: " + parsed.error() + L"\n\n");
-        whereis::print_usage(true);
-        return whereis::usage_error;
+        ConsoleOutput::stderr_text(L"whereis: " + parsed.error() + L"\n\n");
+        print_usage(true);
+        return usage_error;
     }
 
     auto options = std::move(parsed.value());
-    whereis::configure_directories(options);
-    return whereis::run(options);
+    configure_directories(options);
+    return run(options);
 }
 #endif
