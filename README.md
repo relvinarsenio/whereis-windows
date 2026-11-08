@@ -514,9 +514,9 @@ Or specify the build directory and configuration:
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The unit tests cover argument parsing, string and path helpers, environment handling, directory deduplication, output formatting, search orchestration, and the binary, manual, and source searchers.
+Unit tests cover option parsing, path and environment handling, output formatting, and search routines.
 
-The Unicode integration test launches the executable with redirected output. It checks that a filename containing an unpaired UTF-16 surrogate is written with the replacement character (U+FFFD). The test is skipped when the filesystem rejects that filename.
+The Unicode test checks that filenames containing unpaired UTF-16 surrogates are written as U+FFFD in redirected output. It is skipped if the filesystem rejects such filenames.
 
 The acceptance suite creates an isolated temporary directory tree and checks:
 
