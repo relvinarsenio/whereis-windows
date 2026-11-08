@@ -104,19 +104,19 @@ Use `-f` to end the last directory list and begin the program names.
 
 | Option | Description |
 |---|---|
-| `-a` | Print all matches in each enabled category instead of the first match. |
-| `-b` | Search for binaries. |
+| `-a` | Find all matches instead of the first match in each category. |
+| `-b` | Search for executables. |
 | `-m` | Search for manuals and documentation. |
 | `-s` | Search for source directories. |
-| `-B directory ...` | Search the given directories for binaries. |
-| `-M directory ...` | Search the given directories for manuals and documentation. |
-| `-S directory ...` | Search the given directories for source directories. |
-| `-f` | End the directory lists. Remaining arguments are program names. |
-| `-q` | Omit the `name:` label and print only paths. |
-| `-u` | Print only names for which an enabled category has no match. |
-| `-x` | Skip recursive source searches. Direct child directory checks still run. |
-| `-h`, `--help` | Print usage information and exit. |
-| `--` | End option processing. Following arguments are treated as program names. |
+| `-B directory ...` | Override executable search directories. |
+| `-M directory ...` | Override manual and documentation search directories. |
+| `-S directory ...` | Override source search directories. |
+| `-f` | Mark the end of directory lists. |
+| `-q` | Do not print the program name label (`name:`). |
+| `-u` | Show only programs with at least one missing result. |
+| `-x` | Skip recursive source discovery. Direct child directory checks still run. |
+| `-h`, `--help` | Show this help. |
+| `--` | Treat all following arguments as program names. |
 
 The `-B`, `-M`, and `-S` options replace the default search roots for their respective categories.
 
@@ -199,7 +199,7 @@ An explicitly selected category requires at least one search directory.
 
 If a program name contains a path, `whereis` uses its final component.
 
-Before searching, `whereis` removes these compression suffixes from the name:
+Before searching, `whereis` removes one matching compression suffix from the name:
 
 ```text
 .bz2  .zst  .lzma  .gz  .xz  .Z  .z
@@ -285,8 +285,7 @@ It does not run `man` or apply its formatting and section-selection rules.
 
 `whereis` checks each source root for a direct child directory with the requested name.
 
-Unless `-x` is specified, it also searches below each root.
-The search descends at most eight directory levels.
+Unless `-x` is specified, it searches recursively below each root.
 It skips the contents of these directories:
 
 ```text
@@ -372,7 +371,7 @@ The search behavior differs where Windows uses different filesystem and command-
 | Binary search roots | `user.cs_path`, `/usr/libexec`, then `PATH` | `PATH`, system directory, Windows directory, then App Paths |
 | Executable check | Regular file with an execute bit | Existing file with an extension from `PATHEXT` |
 | Manual search | Runs `man -w` | Searches the filesystem |
-| Source search | Fixed `/usr/src` locations and `/usr/ports` subdirectories, with a `locate` fallback | Configured roots and bounded directory search |
+| Source search | Fixed `/usr/src` locations and `/usr/ports` subdirectories, with a `locate` fallback | Configured roots with recursive directory search |
 | Case sensitivity | Case-sensitive | Case-insensitive |
 | Name stripping | Leading path, `s.` prefix, `,v` suffix, `.z`, `.Z`, `.gz`, and `.bz2` | Leading path and `.bz2`, `.zst`, `.lzma`, `.gz`, `.xz`, `.Z`, and `.z` |
 | Directory list separator | `:` | `;` |
@@ -391,7 +390,7 @@ It does not resolve commands through a shell.
 - `whereis` finds `.ps1` scripts only when `.PS1` appears in `PATHEXT`.
 - Manual and source results depend on the configured or detected roots. An installed program may have no matching manual page or source directory.
 - A recursive source search can find an unrelated directory with the requested name. Use `-b` to search only for binaries or `-x` to skip recursion.
-- At the recursion limit, and in excluded directories, `whereis` checks the directory name but does not search its contents.
+- In excluded directories, `whereis` checks the directory name but does not search its contents.
 
 ### PowerShell output
 
@@ -491,16 +490,17 @@ CMake installs the executable as `bin\whereis.exe` below the selected prefix.
 
 | Option | Default | Description |
 |---|---:|---|
-| `BUILD_TESTING` | `ON` | Enable the CTest acceptance suite. |
+| `BUILD_TESTING` | `ON` | Build the unit tests, Unicode integration test, and CTest acceptance suite. |
 | `WHEREIS_BUILD_PROFILE` | `Release` | Default build type for single-configuration generators when `CMAKE_BUILD_TYPE` is not set. |
-| `WHEREIS_ENABLE_IPO` | `ON` | Enable link-time optimization for Release builds when the toolchain supports it. |
-| `WHEREIS_ENABLE_HARDENING` | `ON` | Enable supported hardening options. MSVC uses SDL and Control Flow Guard; GCC and Clang use stack protection. |
+| `WHEREIS_ENABLE_IPO` | `ON` | Enable link-time optimization for Release and RelWithDebInfo builds when the toolchain supports it. |
+| `WHEREIS_ENABLE_HARDENING` | `ON` | Enable supported hardening options. MSVC uses SDL and Control Flow Guard. GCC and Clang use stack protection in Release builds. |
 | `WHEREIS_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings as errors. |
 
 ### Testing
 
-The acceptance tests use a CMake script that CTest runs.
-They do not require PowerShell.
+CTest runs the unit tests, a Unicode integration test, and a CMake-script acceptance suite. The acceptance suite does not require PowerShell.
+
+When tests are enabled, CMake obtains GoogleTest from GitHub through FetchContent. Configuration may need network access when GoogleTest is not already available locally.
 
 Run the tests with the Release preset:
 
@@ -514,20 +514,22 @@ Or specify the build directory and configuration:
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The tests create an isolated temporary directory tree and check:
+The unit tests cover argument parsing, string and path helpers, environment handling, directory deduplication, output formatting, search orchestration, and the binary, manual, and source searchers.
+
+The Unicode integration test launches the executable with redirected output. It checks that a filename containing an unpaired UTF-16 surrogate is written with the replacement character (U+FFFD). The test is skipped when the filesystem rejects that filename.
+
+The acceptance suite creates an isolated temporary directory tree and checks:
 
 - Help output, a missing program name, and unknown options.
-- Names containing dots, paths containing spaces, and Unicode names.
-- UTF-8 output and replacement of malformed UTF-16 file names.
+- Names containing dots, paths containing spaces, and valid Unicode names.
+- UTF-8 redirected output and LF line endings.
 - `-a`, `-q`, `-u`, `-x`, option clusters, `-f`, and `--`.
 - `PATHEXT` handling and custom binary directories.
 - Sectioned manual pages and standalone documentation.
 - Direct and recursive source searches.
-- LF line endings in redirected output.
 - Agreement between the first result and `where.exe` for common commands, including `pwsh`, `python`, `winget`, `wt`, `find`, and `sort`.
 
-The `where.exe` comparison is skipped when a command is not installed.
-All other tests are mandatory.
+The `where.exe` comparison is skipped when the Windows locator is unavailable or cannot find a command.
 
 ## Credits and license
 
