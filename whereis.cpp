@@ -37,9 +37,12 @@
 #include <array>
 #include <climits>
 #include <concepts>
+#include <cstddef>
 #include <cstring>
 #include <expected>
 #include <filesystem>
+#include <format>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -113,10 +116,43 @@ struct SearchResult {
     unsigned missing {};
 };
 
-constexpr auto simple_flags = std::array { std::pair { L'a', &Options::all }, std::pair { L'b', &Options::binaries },
-    std::pair { L'm', &Options::manuals }, std::pair { L'q', &Options::quiet }, std::pair { L's', &Options::sources },
-    std::pair { L'u', &Options::unusual }, std::pair { L'x', &Options::no_recursive_sources },
-    std::pair { L'h', &Options::help } };
+struct FlagSpec {
+    wchar_t letter;
+    bool Options::* member;
+    std::wstring_view long_name;
+    std::wstring_view help;
+};
+
+struct DirectorySpec {
+    wchar_t letter;
+    std::vector<fs::path> Options::* directories;
+    bool Options::* custom;
+    std::wstring_view help;
+};
+
+constexpr std::array flag_specs {
+    FlagSpec { L'a', &Options::all, {}, L"Find all matches instead of the first match in each category" },
+    FlagSpec { L'b', &Options::binaries, {}, L"Search for executables" },
+    FlagSpec { L'm', &Options::manuals, {}, L"Search for manuals and documentation" },
+    FlagSpec { L'q', &Options::quiet, {}, L"Do not print the program name label" },
+    FlagSpec { L's', &Options::sources, {}, L"Search for source directories" },
+    FlagSpec { L'u', &Options::unusual, {}, L"Show only programs with at least one missing result" },
+    FlagSpec { L'x', &Options::no_recursive_sources, {}, L"Skip recursive source discovery" },
+    FlagSpec { L'h', &Options::help, L"--help", L"Show this help" },
+};
+
+constexpr std::array directory_specs {
+    DirectorySpec {
+        L'B', &Options::binary_dirs, &Options::custom_binary_dirs, L"Override executable search directories" },
+    DirectorySpec { L'M', &Options::manual_dirs, &Options::custom_manual_dirs,
+        L"Override manual/documentation search directories" },
+    DirectorySpec { L'S', &Options::source_dirs, &Options::custom_source_dirs, L"Override source search directories" },
+};
+
+constexpr wchar_t list_end_letter            = L'f';
+constexpr std::wstring_view list_end_help    = L"Mark the end of directory lists";
+constexpr std::wstring_view options_end      = L"--";
+constexpr std::wstring_view options_end_help = L"Treat all following arguments as program names";
 
 template <typename T>
 concept SearchBackend = requires(const T& backend, const SearchRequest& request) {
@@ -257,48 +293,113 @@ private:
     std::vector<fs::path> paths_;
 };
 
-[[nodiscard]] constexpr auto find_simple_flag(wchar_t flag) noexcept {
-    return std::ranges::find(simple_flags, flag, &decltype(simple_flags)::value_type::first);
+[[nodiscard]] constexpr const FlagSpec* find_flag(wchar_t letter) noexcept {
+    const auto found = std::ranges::find(flag_specs, letter, &FlagSpec::letter);
+    return found == flag_specs.end() ? nullptr : std::to_address(found);
 }
 
-[[nodiscard]] bool is_simple_flag(wchar_t flag) noexcept {
-    return find_simple_flag(flag) != simple_flags.end();
+[[nodiscard]] constexpr const FlagSpec* find_long_flag(std::wstring_view argument) noexcept {
+    const auto found = std::ranges::find_if(
+        flag_specs, [argument](const FlagSpec& spec) { return !spec.long_name.empty() && spec.long_name == argument; });
+    return found == flag_specs.end() ? nullptr : std::to_address(found);
+}
+
+[[nodiscard]] constexpr const DirectorySpec* find_directory_spec(wchar_t letter) noexcept {
+    const auto found = std::ranges::find(directory_specs, letter, &DirectorySpec::letter);
+    return found == directory_specs.end() ? nullptr : std::to_address(found);
+}
+
+[[nodiscard]] constexpr bool is_unique_letter(wchar_t letter) noexcept {
+    const auto uses = std::ranges::count(flag_specs, letter, &FlagSpec::letter)
+        + std::ranges::count(directory_specs, letter, &DirectorySpec::letter) + (letter == list_end_letter ? 1 : 0);
+    return uses == 1;
+}
+
+[[nodiscard]] constexpr bool all_letters_unique() noexcept {
+    return std::ranges::all_of(flag_specs, [](const FlagSpec& spec) {
+        return is_unique_letter(spec.letter);
+    }) && std::ranges::all_of(directory_specs, [](const DirectorySpec& spec) { return is_unique_letter(spec.letter); });
+}
+
+static_assert(all_letters_unique(), "an option letter is used twice");
+
+[[nodiscard]] bool is_simple_flag(wchar_t letter) noexcept {
+    return find_flag(letter) != nullptr;
+}
+
+[[nodiscard]] constexpr bool ends_cluster(wchar_t letter) noexcept {
+    return letter == list_end_letter || find_directory_spec(letter) != nullptr;
 }
 
 [[nodiscard]] bool is_flag_cluster(std::wstring_view argument) noexcept {
-    if (argument.size() < 2 || argument.front() != L'-' || argument == L"--") { return false; }
+    if (argument.size() < 2 || argument.front() != L'-' || argument == options_end) { return false; }
 
-    auto flags = argument.substr(1);
-    while (!flags.empty()) {
-        const wchar_t flag = flags.front();
-        flags.remove_prefix(1);
-        if (is_simple_flag(flag)) { continue; }
-
-        // -B/-M/-S consume a directory list; -f terminates one. They must
-        // be the final character in a cluster, e.g. -aB, -abf.
-        return flags.empty() && (flag == L'B' || flag == L'M' || flag == L'S' || flag == L'f');
+    auto letters = argument.substr(1);
+    while (letters.size() > 1) {
+        if (!is_simple_flag(letters.front())) { return false; }
+        letters.remove_prefix(1);
     }
-    return true;
-}
 
-[[nodiscard]] bool is_directory_switch(std::wstring_view argument) noexcept {
-    return argument == L"-B" || argument == L"-M" || argument == L"-S";
+    return is_simple_flag(letters.front()) || ends_cluster(letters.front());
 }
 
 [[nodiscard]] wchar_t terminal_directory_switch(std::wstring_view argument) noexcept {
     if (!is_flag_cluster(argument)) { return L'\0'; }
-    const wchar_t last = argument.back();
-    return last == L'B' || last == L'M' || last == L'S' ? last : L'\0';
+    return find_directory_spec(argument.back()) != nullptr ? argument.back() : L'\0';
 }
 
-void apply_simple_flag(Options& options, wchar_t flag) {
-    const auto it = find_simple_flag(flag);
-    if (it != simple_flags.end()) { options.*it->second = true; }
+[[nodiscard]] bool ends_directory_list(std::wstring_view argument) noexcept {
+    return argument == options_end || (is_flag_cluster(argument) && ends_cluster(argument.back()));
+}
+
+using ArgumentIterator = std::span<const std::wstring_view>::iterator;
+
+void take_remaining_as_queries(Options& options, ArgumentIterator& argument, ArgumentIterator end) {
+    for (; argument != end; ++argument) {
+        options.queries.emplace_back(*argument);
+    }
+}
+
+[[nodiscard]] std::expected<void, std::wstring> read_directory_list(
+    const DirectorySpec& spec, Options& options, ArgumentIterator& argument, ArgumentIterator end) {
+    DirectorySet parsed;
+
+    for (; argument != end && !ends_directory_list(*argument); ++argument) {
+        parsed.add_list(*argument);
+    }
+
+    if (parsed.empty()) {
+        return std::unexpected(L"Option -" + std::wstring(1, spec.letter)
+            + L" requires at least one directory before -f or another directory option.");
+    }
+
+    for (const auto& path : parsed.values()) {
+        append_unique_path(options.*spec.directories, path);
+    }
+
+    options.*spec.custom = true;
+    return {};
+}
+
+// The cluster is validated by is_flag_cluster(), so a terminating letter is always last.
+[[nodiscard]] std::expected<void, std::wstring> parse_cluster(
+    std::wstring_view cluster, Options& options, ArgumentIterator& argument, ArgumentIterator end) {
+    for (const wchar_t letter : cluster) {
+        if (const auto* flag = find_flag(letter)) {
+            options.*flag->member = true;
+        } else if (letter == list_end_letter) {
+            take_remaining_as_queries(options, argument, end);
+        } else if (const auto* spec = find_directory_spec(letter)) {
+            return read_directory_list(*spec, options, argument, end);
+        }
+    }
+
+    return {};
 }
 
 [[nodiscard]] std::expected<Options, std::wstring> parse_arguments(std::span<const std::wstring_view> arguments) {
     Options options;
-    bool end_of_options {};
+    bool options_ended {};
 
     auto argument  = arguments.begin();
     const auto end = arguments.end();
@@ -306,26 +407,18 @@ void apply_simple_flag(Options& options, wchar_t flag) {
     while (argument != end) {
         const auto current = *argument++;
 
-        if (end_of_options) {
+        if (options_ended) {
             options.queries.emplace_back(current);
             continue;
         }
 
-        if (current == L"--") {
-            end_of_options = true;
+        if (current == options_end) {
+            options_ended = true;
             continue;
         }
 
-        if (current == L"-f") {
-            for (const auto query : std::ranges::subrange(argument, end)) {
-                options.queries.emplace_back(query);
-            }
-            argument = end;
-            break;
-        }
-
-        if (current == L"--help") {
-            options.help = true;
+        if (const auto* flag = find_long_flag(current)) {
+            options.*flag->member = true;
             continue;
         }
 
@@ -336,68 +429,8 @@ void apply_simple_flag(Options& options, wchar_t flag) {
 
         if (!is_flag_cluster(current)) { return std::unexpected(L"Unknown option: " + std::wstring { current }); }
 
-        auto flags = current.substr(1);
-
-        while (!flags.empty()) {
-            const wchar_t flag = flags.front();
-            flags.remove_prefix(1);
-
-            if (is_simple_flag(flag)) {
-                apply_simple_flag(options, flag);
-                continue;
-            }
-
-            if (flag == L'f') {
-                for (const auto query : std::ranges::subrange(argument, end)) {
-                    options.queries.emplace_back(query);
-                }
-                argument = end;
-                break;
-            }
-
-            std::vector<fs::path>* target {};
-            bool* custom {};
-
-            if (flag == L'B') {
-                target = &options.binary_dirs;
-                custom = &options.custom_binary_dirs;
-            } else if (flag == L'M') {
-                target = &options.manual_dirs;
-                custom = &options.custom_manual_dirs;
-            } else if (flag == L'S') {
-                target = &options.source_dirs;
-                custom = &options.custom_source_dirs;
-            }
-
-            if (target == nullptr || !flags.empty()) {
-                return std::unexpected(L"Directory options -B, -M and -S must end an option cluster.");
-            }
-
-            DirectorySet parsed_directories;
-            bool received_directory {};
-
-            while (argument != end) {
-                const auto next = *argument;
-                if (next == L"--" || next == L"-f" || is_directory_switch(next)
-                    || terminal_directory_switch(next) != L'\0' || (is_flag_cluster(next) && next.back() == L'f')) {
-                    break;
-                }
-
-                parsed_directories.add_list(next);
-                received_directory = true;
-                ++argument;
-            }
-
-            if (!received_directory || parsed_directories.empty()) {
-                return std::unexpected(L"Option -" + std::wstring(1, flag)
-                    + L" requires at least one directory before -f or another directory option.");
-            }
-
-            for (const auto& path : parsed_directories.values()) {
-                append_unique_path(*target, path);
-            }
-            *custom = true;
-            break;
+        if (auto parsed = parse_cluster(current.substr(1), options, argument, end); !parsed) {
+            return std::unexpected(std::move(parsed.error()));
         }
     }
 
@@ -600,6 +633,7 @@ private:
     const std::array registry_roots { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE };
     constexpr std::array<REGSAM, 2> registry_views { static_cast<REGSAM>(KEY_WOW64_64KEY),
         static_cast<REGSAM>(KEY_WOW64_32KEY) };
+    constexpr DWORD wchar_size = static_cast<DWORD>(sizeof(wchar_t));
 
     for (const auto root : registry_roots) {
         for (const REGSAM view : registry_views) {
@@ -607,34 +641,34 @@ private:
             if (RegOpenKeyExW(root, key_name.c_str(), 0, KEY_QUERY_VALUE | view, &raw_key) != ERROR_SUCCESS) {
                 continue;
             }
-            const RegistryKey key { raw_key };
 
+            const RegistryKey key { raw_key };
             DWORD type {};
             DWORD bytes {};
             const LONG size_status = RegQueryValueExW(key.get(), nullptr, nullptr, &type, nullptr, &bytes);
-            if (size_status != ERROR_SUCCESS || bytes < sizeof(wchar_t) || bytes > 65536
-                || bytes % sizeof(wchar_t) != 0) {
+
+            if (size_status != ERROR_SUCCESS || bytes < wchar_size || bytes > 65536 || bytes % wchar_size != 0) {
                 continue;
             }
 
             const DWORD buffer_size = bytes;
             std::vector<BYTE> storage(buffer_size);
-            DWORD read_bytes       = buffer_size;
+            DWORD read_bytes = buffer_size;
+
             const LONG read_status = RegQueryValueExW(key.get(), nullptr, nullptr, &type, storage.data(), &read_bytes);
 
             if (read_status != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) { continue; }
 
-            if (read_bytes < sizeof(wchar_t) || read_bytes > buffer_size || read_bytes % sizeof(wchar_t) != 0) {
-                continue;
-            }
+            if (read_bytes < wchar_size || read_bytes > buffer_size || read_bytes % wchar_size != 0) { continue; }
 
-            const auto character_count = static_cast<std::size_t>(read_bytes / sizeof(wchar_t));
+            const auto character_count = static_cast<std::size_t>(read_bytes / wchar_size);
             std::wstring value(character_count, L'\0');
             std::memcpy(value.data(), storage.data(), static_cast<std::size_t>(read_bytes));
 
             while (!value.empty() && value.back() == L'\0') {
                 value.pop_back();
             }
+
             if (type == REG_EXPAND_SZ) { value = expand_environment(value); }
             value = unquote(std::move(value));
             if (!value.empty()) { return value; }
@@ -953,30 +987,92 @@ private:
     }
 };
 
+[[nodiscard]] std::wstring join_text(const std::vector<std::wstring>& parts) {
+    return parts | std::views::join | std::ranges::to<std::wstring>();
+}
+
+[[nodiscard]] std::wstring flag_letters_text() {
+    return flag_specs | std::views::transform(&FlagSpec::letter) | std::ranges::to<std::wstring>();
+}
+
+[[nodiscard]] std::wstring directory_usage_part(const DirectorySpec& spec) {
+    const std::wstring_view terminator = &spec == &directory_specs.back() ? L" -f" : L"";
+    return std::format(L" [-{} dir ...{}]", spec.letter, terminator);
+}
+
+[[nodiscard]] std::wstring directory_usage_text() {
+    const auto parts
+        = directory_specs | std::views::transform(directory_usage_part) | std::ranges::to<std::vector<std::wstring>>();
+    return join_text(parts);
+}
+
+[[nodiscard]] std::wstring help_line(std::wstring_view label, std::wstring_view description, bool aligned = false) {
+    return aligned ? std::format(L"  {:<12}{}\n", label, description) : std::format(L"  {}  {}\n", label, description);
+}
+
+[[nodiscard]] std::wstring flag_help_part(const FlagSpec& flag) {
+    const auto label = flag.long_name.empty() ? std::format(L"-{}", flag.letter)
+                                              : std::format(L"-{}, {}", flag.letter, flag.long_name);
+    return help_line(label, flag.help, !flag.long_name.empty());
+}
+
+[[nodiscard]] std::wstring directory_help_part(const DirectorySpec& spec) {
+    const auto label = std::format(L"-{}", spec.letter);
+    return help_line(label, spec.help);
+}
+
+[[nodiscard]] constexpr bool has_long_name(const FlagSpec& flag) noexcept {
+    return !flag.long_name.empty();
+}
+
+[[nodiscard]] std::wstring_view help_option_name() noexcept {
+    const auto found = std::ranges::find_if(flag_specs, has_long_name);
+    return found == flag_specs.end() ? std::wstring_view {} : found->long_name;
+}
+
+[[nodiscard]] std::wstring ordered_help_text() {
+    return join_text(
+        std::vector<std::wstring> { flag_help_part(*std::ranges::find(flag_specs, L'a', &FlagSpec::letter)),
+            flag_help_part(*std::ranges::find(flag_specs, L'b', &FlagSpec::letter)),
+            flag_help_part(*std::ranges::find(flag_specs, L'm', &FlagSpec::letter)),
+            flag_help_part(*std::ranges::find(flag_specs, L's', &FlagSpec::letter)),
+
+            directory_help_part(*std::ranges::find(directory_specs, L'B', &DirectorySpec::letter)),
+            directory_help_part(*std::ranges::find(directory_specs, L'M', &DirectorySpec::letter)),
+            directory_help_part(*std::ranges::find(directory_specs, L'S', &DirectorySpec::letter)),
+
+            help_line(L"-f", list_end_help),
+
+            flag_help_part(*std::ranges::find(flag_specs, L'q', &FlagSpec::letter)),
+            flag_help_part(*std::ranges::find(flag_specs, L'u', &FlagSpec::letter)),
+            flag_help_part(*std::ranges::find(flag_specs, L'x', &FlagSpec::letter)),
+            flag_help_part(*std::ranges::find(flag_specs, L'h', &FlagSpec::letter)),
+
+            help_line(options_end, options_end_help) });
+}
+
+[[nodiscard]] std::wstring usage_text() {
+    const auto flag_letters    = flag_letters_text();
+    const auto directory_usage = directory_usage_text();
+    const auto help_option     = help_option_name();
+    const auto help            = ordered_help_text();
+
+    return std::format(L"whereis-windows - locate executables, documentation, and source directories\n"
+                       L"Usage: whereis [-{}]{} name ...\n"
+                       L"       whereis {}\n\n"
+                       L"{}\n"
+                       L"Directory lists use Windows' semicolon separator. Quote paths containing spaces.\n"
+                       L"When no category is selected, -bms is assumed.\n",
+        flag_letters, directory_usage, help_option, help);
+}
+
 void print_usage(bool to_stderr = false) {
-    constexpr std::wstring_view help_text
-        = L"whereis-windows - locate executables, documentation, and source directories\n"
-          L"Usage: whereis [-abmqsuxh] [-B dir ...] [-M dir ...] [-S dir ... -f] name ...\n"
-          L"       whereis --help\n\n"
-          L"  -a  Find all matches instead of the first match in each category\n"
-          L"  -b  Search for executable files (PATH, PATHEXT, and App Paths)\n"
-          L"  -m  Search manual pages and documentation (MANPATH)\n"
-          L"  -s  Search source directories (SRCPATH and common Windows source roots)\n"
-          L"  -B  Override executable search directories\n"
-          L"  -M  Override manual/documentation search directories\n"
-          L"  -S  Override source search directories\n"
-          L"  -f  End directory lists and begin program names\n"
-          L"  -q  Do not print the program name label\n"
-          L"  -u  Print only names missing at least one requested category\n"
-          L"  -x  Skip recursive source discovery\n"
-          L"  -h, --help  Show this help\n"
-          L"  --          Stop option processing; treat remaining arguments as program names\n\n"
-          L"Directory lists use Windows' semicolon separator. Quote paths containing spaces.\n"
-          L"When no category is selected, -bms is assumed.\n";
+    const std::wstring text = usage_text();
+
     if (to_stderr) {
-        ConsoleOutput::stderr_text(help_text);
+        ConsoleOutput::stderr_text(text);
     } else {
-        ConsoleOutput::stdout_text(help_text);
+        ConsoleOutput::stdout_text(text);
     }
 }
 

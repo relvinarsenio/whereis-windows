@@ -78,7 +78,7 @@ run_whereis(0 "help" --help)
 assert_contains("${WHEREIS_OUTPUT}" "Usage: whereis [-abmqsuxh]" "help synopsis lists supported short options")
 assert_contains("${WHEREIS_OUTPUT}" "whereis --help" "help synopsis documents --help")
 assert_contains("${WHEREIS_OUTPUT}" "-h, --help" "help documents both help options")
-assert_contains("${WHEREIS_OUTPUT}" "Stop option processing" "help documents --")
+assert_contains("${WHEREIS_OUTPUT}" "Treat all following arguments as program names" "help documents --")
 
 run_whereis(0 "short help option" -h)
 assert_contains("${WHEREIS_OUTPUT}" "Usage: whereis" "-h prints usage")
