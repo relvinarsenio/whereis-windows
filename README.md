@@ -87,7 +87,7 @@ To uninstall, delete the installation directory and remove its entry from the us
 ### Synopsis
 
 ```text
-whereis [-abmqsuxh] [-B directory ...] [-M directory ...] [-S directory ... -f] name ...
+whereis [-abmqsuxh] [-B dir ...] [-M dir ...] [-S dir ... -f] name ...
 whereis --help
 ```
 
