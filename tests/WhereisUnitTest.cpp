@@ -200,14 +200,156 @@ TEST(ArgumentParser, SplitsAndDeduplicatesCustomDirectoryLists) {
     EXPECT_EQ(parsed->queries, (std::vector<std::wstring> { L"clang" }));
 }
 
-TEST(ArgumentParser, RecognizesValidFlagClustersAndDirectorySwitches) {
+TEST(ArgumentParser, RecognizesValidFlagClustersAndDirectoryListTerminators) {
     EXPECT_TRUE(is_flag_cluster(L"-ab"));
     EXPECT_TRUE(is_flag_cluster(L"-aB"));
     EXPECT_TRUE(is_flag_cluster(L"-abf"));
     EXPECT_FALSE(is_flag_cluster(L"-Ba"));
     EXPECT_FALSE(is_flag_cluster(L"--"));
-    EXPECT_EQ(terminal_directory_switch(L"-aM"), L'M');
-    EXPECT_EQ(terminal_directory_switch(L"-ab"), L'\0');
+
+    EXPECT_TRUE(ends_directory_list(L"--"));
+    EXPECT_TRUE(ends_directory_list(L"-f"));
+    EXPECT_TRUE(ends_directory_list(L"-M"));
+    EXPECT_TRUE(ends_directory_list(L"-aB"));
+    EXPECT_FALSE(ends_directory_list(L"-ab"));
+    EXPECT_FALSE(ends_directory_list(L"foo"));
+}
+
+TEST(ArgumentParser, StopsOptionParsingAtFirstProgramName) {
+    // BSD getopt: the first non-option argument ends option processing,
+    // so later arguments (even flag-shaped ones) become program names.
+    const std::array arguments { std::wstring_view { L"-b" }, std::wstring_view { L"foo" }, std::wstring_view { L"-a" },
+        std::wstring_view { L"bar" } };
+    const auto parsed = parse_arguments(std::span<const std::wstring_view> { arguments });
+
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_TRUE(parsed->binaries);
+    EXPECT_FALSE(parsed->all);
+    EXPECT_EQ(parsed->queries, (std::vector<std::wstring> { L"foo", L"-a", L"bar" }));
+}
+
+TEST(ArgumentParser, DoubleDashBeforeNamesAllowsHyphenatedNames) {
+    const std::array arguments { std::wstring_view { L"-b" }, std::wstring_view { L"--" },
+        std::wstring_view { L"-example" }, std::wstring_view { L"-another" } };
+    const auto parsed = parse_arguments(std::span<const std::wstring_view> { arguments });
+
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->queries, (std::vector<std::wstring> { L"-example", L"-another" }));
+}
+
+TEST(ArgumentParser, AcceptsHelpWithoutProgramNames) {
+    // -h and --help are the only options that may be used without names.
+    const std::array short_arguments { std::wstring_view { L"-h" } };
+    const auto short_parsed = parse_arguments(std::span<const std::wstring_view> { short_arguments });
+
+    ASSERT_TRUE(short_parsed.has_value());
+    EXPECT_TRUE(short_parsed->help);
+    EXPECT_TRUE(short_parsed->queries.empty());
+
+    const std::array long_arguments { std::wstring_view { L"--help" } };
+    const auto long_parsed = parse_arguments(std::span<const std::wstring_view> { long_arguments });
+
+    ASSERT_TRUE(long_parsed.has_value());
+    EXPECT_TRUE(long_parsed->help);
+    EXPECT_TRUE(long_parsed->queries.empty());
+}
+
+TEST(ArgumentParser, ClusterWithTerminalFTakesRemainingAsQueries) {
+    // -f must be the last letter in a cluster; everything after it is a
+    // program name, including strings that look like flags.
+    // The explicit -b prevents implicit-all from masking whether the -m
+    // after the name is processed. If it were, manuals would be true.
+    const std::array arguments { std::wstring_view { L"-b" }, std::wstring_view { L"-af" },
+        std::wstring_view { L"foo" }, std::wstring_view { L"-m" }, std::wstring_view { L"bar" } };
+    const auto parsed = parse_arguments(std::span<const std::wstring_view> { arguments });
+
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_TRUE(parsed->all);
+    EXPECT_TRUE(parsed->binaries);
+    EXPECT_FALSE(parsed->manuals);
+    EXPECT_EQ(parsed->queries, (std::vector<std::wstring> { L"foo", L"-m", L"bar" }));
+}
+
+TEST(ArgumentParser, RejectsTerminalLetterBeforeOtherFlags) {
+    const std::array arguments { std::wstring_view { L"-fa" }, std::wstring_view { L"foo" } };
+    const auto parsed = parse_arguments(std::span<const std::wstring_view> { arguments });
+
+    ASSERT_FALSE(parsed.has_value());
+    EXPECT_NE(parsed.error().find(L"Unknown option"), std::wstring::npos);
+}
+
+TEST(ArgumentParser, TreatsSingleDashAsProgramName) {
+    // A lone "-" is a program name, following Unix convention.
+    const std::array arguments { std::wstring_view { L"-" }, std::wstring_view { L"foo" } };
+    const auto parsed = parse_arguments(std::span<const std::wstring_view> { arguments });
+
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->queries, (std::vector<std::wstring> { L"-", L"foo" }));
+}
+
+TEST(ArgumentParser, HandlesMultipleDirectorySwitches) {
+    TemporaryDirectory temporary;
+    const auto bin_dir = temporary.path() / L"bin";
+    const auto man_dir = temporary.path() / L"man";
+    fs::create_directories(bin_dir);
+    fs::create_directories(man_dir);
+
+    const std::array arguments { std::wstring_view { L"-B" }, std::wstring_view { bin_dir.native() },
+        std::wstring_view { L"-M" }, std::wstring_view { man_dir.native() }, std::wstring_view { L"-f" },
+        std::wstring_view { L"clang" } };
+    const auto parsed = parse_arguments(std::span<const std::wstring_view> { arguments });
+
+    ASSERT_TRUE(parsed.has_value());
+    ASSERT_EQ(parsed->binary_dirs.size(), 1u);
+    EXPECT_TRUE(same_path(parsed->binary_dirs[0], bin_dir));
+    ASSERT_EQ(parsed->manual_dirs.size(), 1u);
+    EXPECT_TRUE(same_path(parsed->manual_dirs[0], man_dir));
+    EXPECT_EQ(parsed->queries, (std::vector<std::wstring> { L"clang" }));
+}
+
+TEST(ArgumentParser, CombinesFlagAndDirectorySwitchInOneCluster) {
+    // -aB processes 'a' first, then 'B' consumes the following directories.
+    TemporaryDirectory temporary;
+    const auto bin_dir = temporary.path() / L"bin";
+    fs::create_directories(bin_dir);
+
+    const std::array arguments { std::wstring_view { L"-aB" }, std::wstring_view { bin_dir.native() },
+        std::wstring_view { L"-f" }, std::wstring_view { L"clang" } };
+    const auto parsed = parse_arguments(std::span<const std::wstring_view> { arguments });
+
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_TRUE(parsed->all);
+    EXPECT_TRUE(parsed->custom_binary_dirs);
+    ASSERT_EQ(parsed->binary_dirs.size(), 1u);
+    EXPECT_TRUE(same_path(parsed->binary_dirs[0], bin_dir));
+    EXPECT_EQ(parsed->queries, (std::vector<std::wstring> { L"clang" }));
+}
+
+TEST(ArgumentParser, AccumulatesMultipleBinaryDirectorySwitches) {
+    TemporaryDirectory temporary;
+    const auto first  = temporary.path() / L"first";
+    const auto second = temporary.path() / L"second";
+    fs::create_directories(first);
+    fs::create_directories(second);
+
+    const std::array arguments { std::wstring_view { L"-B" }, std::wstring_view { first.native() },
+        std::wstring_view { L"-B" }, std::wstring_view { second.native() }, std::wstring_view { L"-f" },
+        std::wstring_view { L"clang" } };
+    const auto parsed = parse_arguments(std::span<const std::wstring_view> { arguments });
+
+    ASSERT_TRUE(parsed.has_value());
+    ASSERT_EQ(parsed->binary_dirs.size(), 2u);
+    EXPECT_TRUE(same_path(parsed->binary_dirs[0], first));
+    EXPECT_TRUE(same_path(parsed->binary_dirs[1], second));
+    EXPECT_EQ(parsed->queries, (std::vector<std::wstring> { L"clang" }));
+}
+
+TEST(ArgumentParser, RejectsTripleDash) {
+    const std::array arguments { std::wstring_view { L"---" }, std::wstring_view { L"foo" } };
+    const auto parsed = parse_arguments(std::span<const std::wstring_view> { arguments });
+
+    ASSERT_FALSE(parsed.has_value());
+    EXPECT_NE(parsed.error().find(L"Unknown option"), std::wstring::npos);
 }
 
 TEST(EnvironmentHelpers, ParsesAndDeduplicatesPathExtensions) {
@@ -290,6 +432,55 @@ TEST(BinarySearcher, FindsAnExecutableInTheProvidedDirectory) {
     EXPECT_TRUE(same_path(matches.front(), canonical_case(executable)));
 }
 
+TEST(BinarySearcher, FindsDottedNameWithAppendedPathext) {
+    // A dot in the name (python3.12, tool.v2) does not mean an executable
+    // extension is present, so PATHEXT is appended. Matches cmd.exe.
+    TemporaryDirectory temporary;
+    ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".EXE" } };
+    const auto executable = temporary.path() / L"python3.12.EXE";
+    write_file(executable);
+
+    const std::array directories { temporary.path() };
+    const BinarySearcher searcher { std::span<const fs::path> { directories } };
+    const auto matches = searcher.find({ L"python3.12", false, false });
+
+    ASSERT_EQ(matches.size(), 1u);
+    EXPECT_TRUE(same_path(matches.front(), canonical_case(executable)));
+}
+
+TEST(BinarySearcher, UsesLiteralWhenExtensionIsInPathext) {
+    // An explicit executable extension (tool.exe) is looked up literally,
+    // never as tool.exe.EXE.
+    TemporaryDirectory temporary;
+    ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".EXE" } };
+    const auto executable = temporary.path() / L"tool.EXE";
+    write_file(executable);
+
+    const std::array directories { temporary.path() };
+    const BinarySearcher searcher { std::span<const fs::path> { directories } };
+    const auto matches = searcher.find({ L"tool.exe", false, false });
+
+    ASSERT_EQ(matches.size(), 1u);
+    EXPECT_TRUE(same_path(matches.front(), canonical_case(executable)));
+}
+
+TEST(BinarySearcher, RespectsPathextOrderWhenMultipleExtensionsMatch) {
+    // With PATHEXT=.COM;.EXE and both files present, .COM wins.
+    TemporaryDirectory temporary;
+    ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".COM;.EXE" } };
+    const auto com_file = temporary.path() / L"unit-tool.COM";
+    const auto exe_file = temporary.path() / L"unit-tool.EXE";
+    write_file(com_file);
+    write_file(exe_file);
+
+    const std::array directories { temporary.path() };
+    const BinarySearcher searcher { std::span<const fs::path> { directories } };
+    const auto matches = searcher.find({ L"unit-tool", false, false });
+
+    ASSERT_EQ(matches.size(), 1u);
+    EXPECT_TRUE(same_path(matches.front(), canonical_case(com_file)));
+}
+
 TEST(ManualSearcher, FindsACompressedSectionedManualPage) {
     TemporaryDirectory temporary;
     const auto page_directory = temporary.path() / L"man1";
@@ -305,10 +496,25 @@ TEST(ManualSearcher, FindsACompressedSectionedManualPage) {
     EXPECT_TRUE(same_path(matches.front(), page));
 }
 
+TEST(ManualSearcher, FindsStandaloneDocument) {
+    // Covers the second phase of ManualSearcher::find: loose documents are
+    // checked after every section and suffix misses.
+    TemporaryDirectory temporary;
+    const auto document = temporary.path() / L"unit-tool.md";
+    write_file(document);
+
+    const std::array directories { temporary.path() };
+    const ManualSearcher searcher { std::span<const fs::path> { directories } };
+    const auto matches = searcher.find({ L"unit-tool", false, false });
+
+    ASSERT_EQ(matches.size(), 1u);
+    EXPECT_TRUE(same_path(matches.front(), document));
+}
+
 TEST(SourceSearcher, HandlesDirectRecursiveAndDisabledRecursiveLookup) {
     TemporaryDirectory temporary;
-    const auto direct = temporary.path() / L"unit-direct";
-    auto recursive    = temporary.path();
+    const auto direct  = temporary.path() / L"unit-direct";
+    fs::path recursive = temporary.path();
     for (unsigned int level = 0; level < 10; ++level) {
         recursive /= L"nested";
     }
@@ -329,6 +535,20 @@ TEST(SourceSearcher, HandlesDirectRecursiveAndDisabledRecursiveLookup) {
     EXPECT_TRUE(same_path(recursive_matches.front(), recursive));
 
     EXPECT_TRUE(searcher.find({ L"unit-recursive", false, true }).empty());
+}
+
+TEST(SourceSearcher, PrunesIgnoredDirectories) {
+    // .git and other ignored directories are pruned, so matches inside
+    // them are not reported.
+    TemporaryDirectory temporary;
+    const auto hidden = temporary.path() / L".git" / L"unit-tool";
+    fs::create_directories(hidden);
+
+    const std::array directories { temporary.path() };
+    const SourceSearcher searcher { std::span<const fs::path> { directories } };
+    const auto matches = searcher.find({ L"unit-tool", false, false });
+
+    EXPECT_TRUE(matches.empty());
 }
 
 } // namespace

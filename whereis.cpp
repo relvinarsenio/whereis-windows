@@ -116,9 +116,15 @@ struct SearchResult {
     unsigned missing {};
 };
 
+enum class HelpPosition {
+    search,
+    output
+};
+
 struct FlagSpec {
     wchar_t letter;
     bool Options::* member;
+    HelpPosition position;
     std::wstring_view long_name;
     std::wstring_view help;
 };
@@ -131,14 +137,16 @@ struct DirectorySpec {
 };
 
 constexpr std::array flag_specs {
-    FlagSpec { L'a', &Options::all, {}, L"Find all matches instead of the first match in each category" },
-    FlagSpec { L'b', &Options::binaries, {}, L"Search for executables" },
-    FlagSpec { L'm', &Options::manuals, {}, L"Search for manuals and documentation" },
-    FlagSpec { L'q', &Options::quiet, {}, L"Do not print the program name label" },
-    FlagSpec { L's', &Options::sources, {}, L"Search for source directories" },
-    FlagSpec { L'u', &Options::unusual, {}, L"Show only programs with at least one missing result" },
-    FlagSpec { L'x', &Options::no_recursive_sources, {}, L"Skip recursive source discovery" },
-    FlagSpec { L'h', &Options::help, L"--help", L"Show this help" },
+    FlagSpec { L'a', &Options::all, HelpPosition::search, {},
+        L"Find all matches instead of the first match in each category" },
+    FlagSpec { L'b', &Options::binaries, HelpPosition::search, {}, L"Search for executables" },
+    FlagSpec { L'm', &Options::manuals, HelpPosition::search, {}, L"Search for manuals and documentation" },
+    FlagSpec { L'q', &Options::quiet, HelpPosition::output, {}, L"Do not print the program name label" },
+    FlagSpec { L's', &Options::sources, HelpPosition::search, {}, L"Search for source directories" },
+    FlagSpec {
+        L'u', &Options::unusual, HelpPosition::output, {}, L"Show only programs with at least one missing result" },
+    FlagSpec { L'x', &Options::no_recursive_sources, HelpPosition::output, {}, L"Skip recursive source discovery" },
+    FlagSpec { L'h', &Options::help, HelpPosition::output, L"--help", L"Show this help" },
 };
 
 constexpr std::array directory_specs {
@@ -343,11 +351,6 @@ static_assert(all_letters_unique(), "an option letter is used twice");
     return is_simple_flag(letters.front()) || ends_cluster(letters.front());
 }
 
-[[nodiscard]] wchar_t terminal_directory_switch(std::wstring_view argument) noexcept {
-    if (!is_flag_cluster(argument)) { return L'\0'; }
-    return find_directory_spec(argument.back()) != nullptr ? argument.back() : L'\0';
-}
-
 [[nodiscard]] bool ends_directory_list(std::wstring_view argument) noexcept {
     return argument == options_end || (is_flag_cluster(argument) && ends_cluster(argument.back()));
 }
@@ -424,6 +427,7 @@ void take_remaining_as_queries(Options& options, ArgumentIterator& argument, Arg
 
         if (!current.starts_with(L'-') || current.size() == 1) {
             options.queries.emplace_back(current);
+            take_remaining_as_queries(options, argument, end);
             continue;
         }
 
@@ -553,7 +557,8 @@ void configure_directories(Options& options) {
 
 [[nodiscard]] std::wstring normalized_query(std::wstring_view argument) {
     fs::path input { argument };
-    auto name = input.filename().native();
+    const fs::path filename { input.filename() };
+    std::wstring name { filename.native() };
 
     constexpr std::array compression_suffixes { std::wstring_view { L".bz2" }, std::wstring_view { L".zst" },
         std::wstring_view { L".lzma" }, std::wstring_view { L".gz" }, std::wstring_view { L".xz" },
@@ -987,8 +992,8 @@ private:
     }
 };
 
-[[nodiscard]] std::wstring join_text(const std::vector<std::wstring>& parts) {
-    return parts | std::views::join | std::ranges::to<std::wstring>();
+template <std::ranges::input_range Parts> [[nodiscard]] std::wstring join_text(Parts&& parts) {
+    return std::forward<Parts>(parts) | std::views::join | std::ranges::to<std::wstring>();
 }
 
 [[nodiscard]] std::wstring flag_letters_text() {
@@ -996,14 +1001,13 @@ private:
 }
 
 [[nodiscard]] std::wstring directory_usage_part(const DirectorySpec& spec) {
-    const std::wstring_view terminator = &spec == &directory_specs.back() ? L" -f" : L"";
+    const std::wstring terminator
+        = &spec == &directory_specs.back() ? std::format(L" -{}", list_end_letter) : std::wstring {};
     return std::format(L" [-{} dir ...{}]", spec.letter, terminator);
 }
 
 [[nodiscard]] std::wstring directory_usage_text() {
-    const auto parts
-        = directory_specs | std::views::transform(directory_usage_part) | std::ranges::to<std::vector<std::wstring>>();
-    return join_text(parts);
+    return join_text(directory_specs | std::views::transform(directory_usage_part));
 }
 
 [[nodiscard]] std::wstring help_line(std::wstring_view label, std::wstring_view description, bool aligned = false) {
@@ -1017,8 +1021,7 @@ private:
 }
 
 [[nodiscard]] std::wstring directory_help_part(const DirectorySpec& spec) {
-    const auto label = std::format(L"-{}", spec.letter);
-    return help_line(label, spec.help);
+    return help_line(std::format(L"-{}", spec.letter), spec.help);
 }
 
 [[nodiscard]] constexpr bool has_long_name(const FlagSpec& flag) noexcept {
@@ -1030,40 +1033,34 @@ private:
     return found == flag_specs.end() ? std::wstring_view {} : found->long_name;
 }
 
-[[nodiscard]] std::wstring ordered_help_text() {
-    return join_text(
-        std::vector<std::wstring> { flag_help_part(*std::ranges::find(flag_specs, L'a', &FlagSpec::letter)),
-            flag_help_part(*std::ranges::find(flag_specs, L'b', &FlagSpec::letter)),
-            flag_help_part(*std::ranges::find(flag_specs, L'm', &FlagSpec::letter)),
-            flag_help_part(*std::ranges::find(flag_specs, L's', &FlagSpec::letter)),
+[[nodiscard]] std::wstring flags_help(HelpPosition position) {
+    const auto in_position = [position](const FlagSpec& flag) { return flag.position == position; };
+    return join_text(flag_specs | std::views::filter(in_position) | std::views::transform(flag_help_part));
+}
 
-            directory_help_part(*std::ranges::find(directory_specs, L'B', &DirectorySpec::letter)),
-            directory_help_part(*std::ranges::find(directory_specs, L'M', &DirectorySpec::letter)),
-            directory_help_part(*std::ranges::find(directory_specs, L'S', &DirectorySpec::letter)),
+[[nodiscard]] std::wstring directories_help() {
+    return join_text(directory_specs | std::views::transform(directory_help_part));
+}
 
-            help_line(L"-f", list_end_help),
-
-            flag_help_part(*std::ranges::find(flag_specs, L'q', &FlagSpec::letter)),
-            flag_help_part(*std::ranges::find(flag_specs, L'u', &FlagSpec::letter)),
-            flag_help_part(*std::ranges::find(flag_specs, L'x', &FlagSpec::letter)),
-            flag_help_part(*std::ranges::find(flag_specs, L'h', &FlagSpec::letter)),
-
-            help_line(options_end, options_end_help) });
+[[nodiscard]] std::wstring help_text() {
+    const std::array sections {
+        flags_help(HelpPosition::search),
+        directories_help(),
+        help_line(std::format(L"-{}", list_end_letter), list_end_help),
+        flags_help(HelpPosition::output),
+        help_line(options_end, options_end_help),
+    };
+    return join_text(sections);
 }
 
 [[nodiscard]] std::wstring usage_text() {
-    const auto flag_letters    = flag_letters_text();
-    const auto directory_usage = directory_usage_text();
-    const auto help_option     = help_option_name();
-    const auto help            = ordered_help_text();
-
     return std::format(L"whereis-windows - locate executables, documentation, and source directories\n"
                        L"Usage: whereis [-{}]{} name ...\n"
                        L"       whereis {}\n\n"
                        L"{}\n"
                        L"Directory lists use Windows' semicolon separator. Quote paths containing spaces.\n"
                        L"When no category is selected, -bms is assumed.\n",
-        flag_letters, directory_usage, help_option, help);
+        flag_letters_text(), directory_usage_text(), help_option_name(), help_text());
 }
 
 void print_usage(bool to_stderr = false) {
