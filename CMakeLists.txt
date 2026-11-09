@@ -15,9 +15,6 @@ include(CheckIPOSupported)
 include(CTest)
 include(GNUInstallDirs)
 
-# Choose a sensible default for single-configuration generators such as Ninja
-# and Unix Makefiles. Multi-configuration generators (for example, Visual
-# Studio) select Debug/Release at build and test time instead.
 set(WHEREIS_BUILD_PROFILE "Release" CACHE STRING
     "Default configuration for single-configuration generators")
 set_property(CACHE WHEREIS_BUILD_PROFILE PROPERTY STRINGS
@@ -41,20 +38,59 @@ option(WHEREIS_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_executable(whereis
-    whereis.cpp
-)
+add_library(whereis_compiler_flags INTERFACE)
 
-add_executable(whereis::whereis ALIAS whereis)
-
-target_compile_features(whereis PRIVATE cxx_std_23)
-target_compile_definitions(whereis PRIVATE
+target_compile_features(whereis_compiler_flags INTERFACE cxx_std_23)
+target_compile_definitions(whereis_compiler_flags INTERFACE
     UNICODE
     _UNICODE
     NOMINMAX
     WIN32_LEAN_AND_MEAN
 )
-target_link_libraries(whereis PRIVATE Advapi32)
+
+if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    target_compile_options(whereis_compiler_flags INTERFACE
+        /W4
+        /permissive-
+        /Zc:__cplusplus
+        /Zc:preprocessor
+        /utf-8
+        /EHsc
+    )
+    if(WHEREIS_WARNINGS_AS_ERRORS)
+        target_compile_options(whereis_compiler_flags INTERFACE /WX)
+    endif()
+else()
+    target_compile_options(whereis_compiler_flags INTERFACE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Wconversion
+        -Wsign-conversion
+        -Wshadow
+        -Wformat=2
+    )
+    if(WHEREIS_WARNINGS_AS_ERRORS)
+        target_compile_options(whereis_compiler_flags INTERFACE -Werror)
+    endif()
+endif()
+
+set(WHEREIS_PCH_HEADERS
+    <windows.h>
+    <winreg.h>
+    <algorithm>
+    <filesystem>
+    <format>
+    <ranges>
+    <string>
+    <vector>
+)
+
+add_executable(whereis whereis.cpp)
+add_executable(whereis::whereis ALIAS whereis)
+
+target_link_libraries(whereis PRIVATE whereis_compiler_flags Advapi32)
+target_precompile_headers(whereis PRIVATE ${WHEREIS_PCH_HEADERS})
 
 set_target_properties(whereis PROPERTIES
     CXX_STANDARD 23
@@ -63,18 +99,7 @@ set_target_properties(whereis PROPERTIES
     OUTPUT_NAME whereis
 )
 
-# Keep warnings and compiler policy local to this target. clang-cl uses the
-# MSVC command-line frontend even though its compiler ID is Clang.
 if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-    target_compile_options(whereis PRIVATE
-        /W4
-        /permissive-
-        /Zc:__cplusplus
-        /Zc:preprocessor
-        /utf-8
-        /EHsc
-    )
-
     if(WHEREIS_ENABLE_HARDENING)
         target_compile_options(whereis PRIVATE /sdl /guard:cf)
         target_link_options(whereis PRIVATE
@@ -84,24 +109,12 @@ if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
         )
     endif()
 
-    # CMake's standard Release flags already select /O2. These linker options
-    # remove unreferenced COMDATs and fold identical ones in optimized builds.
     target_link_options(whereis PRIVATE
         "$<$<CONFIG:Release>:/OPT:REF>"
         "$<$<CONFIG:Release>:/OPT:ICF>"
         "$<$<CONFIG:Release>:/INCREMENTAL:NO>"
     )
 else()
-    target_compile_options(whereis PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Wconversion
-        -Wsign-conversion
-        -Wshadow
-        -Wformat=2
-    )
-
     if(WHEREIS_ENABLE_HARDENING)
         target_compile_options(whereis PRIVATE
             "$<$<CONFIG:Release>:-fstack-protector-strong>"
@@ -117,14 +130,6 @@ else()
     )
 endif()
 
-if(WHEREIS_WARNINGS_AS_ERRORS)
-    if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-        target_compile_options(whereis PRIVATE /WX)
-    else()
-        target_compile_options(whereis PRIVATE -Werror)
-    endif()
-endif()
-
 if(WHEREIS_ENABLE_IPO)
     check_ipo_supported(RESULT WHEREIS_IPO_SUPPORTED OUTPUT WHEREIS_IPO_DIAGNOSTIC LANGUAGES CXX)
     if(WHEREIS_IPO_SUPPORTED)
@@ -136,6 +141,8 @@ if(WHEREIS_ENABLE_IPO)
 endif()
 
 install(TARGETS whereis
+    RUNTIME_DEPENDENCIES
+        PRE_EXCLUDE_REGEXES ".*[Ww]indows/System32/.*" ".*[Ww]indows/SysWOW64/.*"
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     COMPONENT Runtime
 )
@@ -152,6 +159,7 @@ if(BUILD_TESTING)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     set(gtest_build_tests OFF CACHE BOOL "" FORCE)
     set(gtest_build_samples OFF CACHE BOOL "" FORCE)
+    set(gtest_force_shared_crt OFF CACHE BOOL "" FORCE)
 
     FetchContent_Declare(
         googletest
@@ -161,85 +169,15 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(googletest)
 
     add_executable(whereis_unicode_test tests/UnicodeTest.cpp)
-    target_compile_features(whereis_unicode_test PRIVATE cxx_std_23)
-    target_compile_definitions(whereis_unicode_test PRIVATE
-        UNICODE
-        _UNICODE
-        NOMINMAX
-        WIN32_LEAN_AND_MEAN
-    )
+    target_link_libraries(whereis_unicode_test PRIVATE whereis_compiler_flags GTest::gtest_main)
+    target_precompile_headers(whereis_unicode_test PRIVATE ${WHEREIS_PCH_HEADERS})
 
-    if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-        target_compile_options(whereis_unicode_test PRIVATE
-            /W4
-            /permissive-
-            /Zc:__cplusplus
-            /Zc:preprocessor
-            /utf-8
-            /EHsc
-        )
-        if(WHEREIS_WARNINGS_AS_ERRORS)
-            target_compile_options(whereis_unicode_test PRIVATE /WX)
-        endif()
-    else()
-        target_compile_options(whereis_unicode_test PRIVATE
-            -Wall
-            -Wextra
-            -Wpedantic
-            -Wconversion
-            -Wsign-conversion
-            -Wshadow
-            -Wformat=2
-        )
-        if(WHEREIS_WARNINGS_AS_ERRORS)
-            target_compile_options(whereis_unicode_test PRIVATE -Werror)
-        endif()
-    endif()
-
-    target_link_libraries(whereis_unicode_test PRIVATE GTest::gtest_main)
-
-
-    # Compile the implementation into this test translation unit so internal
-    # functions and searcher classes can be tested without a public test API.
     add_executable(whereis_unit_test tests/WhereisUnitTest.cpp)
-    target_compile_features(whereis_unit_test PRIVATE cxx_std_23)
-    target_compile_definitions(whereis_unit_test PRIVATE
-        UNICODE
-        _UNICODE
-        NOMINMAX
-        WIN32_LEAN_AND_MEAN
-    )
-
-    if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-        target_compile_options(whereis_unit_test PRIVATE
-            /W4
-            /permissive-
-            /Zc:__cplusplus
-            /Zc:preprocessor
-            /utf-8
-            /EHsc
-        )
-        if(WHEREIS_WARNINGS_AS_ERRORS)
-            target_compile_options(whereis_unit_test PRIVATE /WX)
-        endif()
-    else()
-        target_compile_options(whereis_unit_test PRIVATE
-            -Wall
-            -Wextra
-            -Wpedantic
-            -Wconversion
-            -Wsign-conversion
-            -Wshadow
-            -Wformat=2
-        )
-        if(WHEREIS_WARNINGS_AS_ERRORS)
-            target_compile_options(whereis_unit_test PRIVATE -Werror)
-        endif()
-    endif()
-
-    target_link_libraries(whereis_unit_test PRIVATE GTest::gtest_main Advapi32)
+    target_link_libraries(whereis_unit_test PRIVATE whereis_compiler_flags GTest::gtest_main Advapi32)
+    target_precompile_headers(whereis_unit_test PRIVATE ${WHEREIS_PCH_HEADERS})
 
     include(GoogleTest)
+    
     gtest_discover_tests(whereis_unit_test
         DISCOVERY_TIMEOUT 15
         PROPERTIES

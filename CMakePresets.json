@@ -64,5 +64,45 @@
         "outputOnFailure": true
       }
     }
+  ],
+  "workflowPresets": [
+    {
+      "name": "release",
+      "displayName": "Build and Test Release",
+      "description": "Runs configure, build, and test steps for the Release build.",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "release"
+        },
+        {
+          "type": "test",
+          "name": "release"
+        }
+      ]
+    },
+    {
+      "name": "debug",
+      "displayName": "Build and Test Debug",
+      "description": "Runs configure, build, and test steps for the Debug build.",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "debug"
+        },
+        {
+          "type": "test",
+          "name": "debug"
+        }
+      ]
+    }
   ]
 }

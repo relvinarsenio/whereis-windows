@@ -100,6 +100,10 @@ For example, use `-aB` rather than `-Ba`.
 A directory list ends when another directory option appears, or when `-f` or `--` appears.
 Use `-f` to end the last directory list and begin the program names.
 
+Option processing stops at the first argument that is not an option.
+Put options before program names (for example, `whereis -b clang`).
+Use `--` for names that begin with a hyphen.
+
 ### Options
 
 | Option | Description |
@@ -440,7 +444,13 @@ cmd /c "whereis.exe -b pwsh > out.txt"
 
 ### Build
 
-Build the Release configuration with the provided CMake preset:
+Build the Release configuration with the provided CMake workflow preset:
+
+```powershell
+cmake --workflow --preset release
+```
+
+Alternatively, run the configure, build, and test steps individually:
 
 ```powershell
 cmake --preset release

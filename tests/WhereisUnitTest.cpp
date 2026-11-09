@@ -352,6 +352,26 @@ TEST(ArgumentParser, RejectsTripleDash) {
     EXPECT_NE(parsed.error().find(L"Unknown option"), std::wstring::npos);
 }
 
+TEST(ArgumentParser, RejectsAnEmptyDirectoryList) {
+    const std::array arguments { std::wstring_view { L"-B" }, std::wstring_view { L"-f" },
+        std::wstring_view { L"foo" } };
+    const auto parsed = parse_arguments(std::span<const std::wstring_view> { arguments });
+
+    ASSERT_FALSE(parsed.has_value());
+    EXPECT_NE(parsed.error().find(L"requires at least one directory"), std::wstring::npos);
+}
+
+TEST(ArgumentParser, ClusterEndingWithFClosesTheDirectoryList) {
+    const std::array arguments { std::wstring_view { L"-B" }, std::wstring_view { L"C:\\Tools" },
+        std::wstring_view { L"-af" }, std::wstring_view { L"foo" } };
+    const auto parsed = parse_arguments(std::span<const std::wstring_view> { arguments });
+
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_TRUE(parsed->all);
+    ASSERT_EQ(parsed->binary_dirs.size(), 1u);
+    EXPECT_EQ(parsed->queries, (std::vector<std::wstring> { L"foo" }));
+}
+
 TEST(EnvironmentHelpers, ParsesAndDeduplicatesPathExtensions) {
     ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".EXE;.CMD;.exe;BAT" } };
 
