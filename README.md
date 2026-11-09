@@ -459,10 +459,10 @@ ctest --preset release
 ```
 
 A `debug` preset is also available.
-It builds in `build-debug`.
+It builds in `out\build\debug`.
 
-CMake presets do not select a generator, architecture, or toolset.
-CMake uses its default generator unless `CMAKE_GENERATOR` specifies another.
+The presets target x64 and use CMake's default generator.
+To use a different generator, set the CMAKE_GENERATOR environment variable.
 
 Set `CMAKE_GENERATOR` to use Ninja:
 
@@ -476,13 +476,13 @@ Run the build from Developer PowerShell or another environment with the compiler
 With a multi-configuration generator such as Visual Studio, the executable is located at:
 
 ```text
-build\Release\whereis.exe
+out\build\release\Release\whereis.exe
 ```
 
 With a single-configuration generator such as Ninja, the executable is located at:
 
 ```text
-build\whereis.exe
+out\build\release\whereis.exe
 ```
 
 When building without presets and using a multi-configuration generator, pass `--config Release` to `cmake --build` and `-C Release` to `ctest`.
@@ -491,7 +491,7 @@ Otherwise, CMake uses the default configuration, which is commonly Debug.
 Install the executable with CMake:
 
 ```powershell
-cmake --install build --config Release --prefix "$env:LOCALAPPDATA/Programs/whereis"
+cmake --install out\build\release --config Release --prefix "$env:LOCALAPPDATA\Programs\whereis"
 ```
 
 CMake installs the executable as `bin\whereis.exe` below the selected prefix.
@@ -521,7 +521,7 @@ ctest --preset release
 Or specify the build directory and configuration:
 
 ```powershell
-ctest --test-dir build -C Release --output-on-failure
+ctest --test-dir out\build\release -C Release --output-on-failure
 ```
 
 Unit tests cover option parsing, path and environment handling, output formatting, and search routines.

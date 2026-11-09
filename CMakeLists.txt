@@ -109,10 +109,19 @@ if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
         )
     endif()
 
+    target_compile_options(whereis PRIVATE
+        "$<$<CONFIG:Release>:/Gw>"
+    )
+
+    if(MSVC_VERSION GREATER_EQUAL 1935)
+        target_compile_options(whereis PRIVATE
+            "$<$<CONFIG:Release>:/Zc:checkGwOdr>"
+        )
+    endif()
+
     target_link_options(whereis PRIVATE
         "$<$<CONFIG:Release>:/OPT:REF>"
         "$<$<CONFIG:Release>:/OPT:ICF>"
-        "$<$<CONFIG:Release>:/INCREMENTAL:NO>"
     )
 else()
     if(WHEREIS_ENABLE_HARDENING)
@@ -136,13 +145,11 @@ if(WHEREIS_ENABLE_IPO)
         set_property(TARGET whereis PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
         set_property(TARGET whereis PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
     else()
-        message(STATUS "IPO/LTO is unavailable; optimized builds will use the compiler's normal Release optimization: ${WHEREIS_IPO_DIAGNOSTIC}")
+        message(STATUS "IPO/LTO is unavailable; optimized builds will use the compiler's normal optimization: ${WHEREIS_IPO_DIAGNOSTIC}")
     endif()
 endif()
 
 install(TARGETS whereis
-    RUNTIME_DEPENDENCIES
-        PRE_EXCLUDE_REGEXES ".*[Ww]indows/System32/.*" ".*[Ww]indows/SysWOW64/.*"
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     COMPONENT Runtime
 )

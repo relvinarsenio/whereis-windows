@@ -7,12 +7,29 @@
   },
   "configurePresets": [
     {
+      "name": "windows-base",
+      "hidden": true,
+      "description": "Base configuration for Windows builds.",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      }
+    },
+    {
       "name": "release",
-      "displayName": "Release",
-      "description": "Optimized build. Uses the generator's normal build layout and configuration selection.",
-      "binaryDir": "${sourceDir}/build",
+      "displayName": "Release (x64)",
+      "description": "Optimized build with tests and hardening.",
+      "inherits": "windows-base",
       "cacheVariables": {
         "WHEREIS_BUILD_PROFILE": "Release",
+        "CMAKE_BUILD_TYPE": "Release",
         "BUILD_TESTING": "ON",
         "WHEREIS_ENABLE_IPO": "ON",
         "WHEREIS_ENABLE_HARDENING": "ON"
@@ -20,11 +37,12 @@
     },
     {
       "name": "debug",
-      "displayName": "Debug",
-      "description": "Development build. Uses a separate build directory and enables tests and hardening.",
-      "binaryDir": "${sourceDir}/build-debug",
+      "displayName": "Debug (x64)",
+      "description": "Development build with tests and hardening.",
+      "inherits": "windows-base",
       "cacheVariables": {
         "WHEREIS_BUILD_PROFILE": "Debug",
+        "CMAKE_BUILD_TYPE": "Debug",
         "BUILD_TESTING": "ON",
         "WHEREIS_ENABLE_IPO": "OFF",
         "WHEREIS_ENABLE_HARDENING": "ON"
