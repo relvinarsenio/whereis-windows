@@ -879,15 +879,15 @@ template <SearchBackend Binary, SearchBackend Manual, SearchBackend Source>
 }
 
 [[nodiscard]] std::wstring quote_path(const fs::path& path) {
-    const auto& value = path.native();
-    if (value.find_first_of(L" \t") == std::wstring::npos) { return value; }
+    const auto& value { path.native() };
 
-    std::wstring quoted;
-    quoted.reserve(value.size() + 2);
-    quoted.push_back(L'"');
-    quoted.append(value);
-    quoted.push_back(L'"');
-    return quoted;
+    if (std::ranges::find_first_of(value, std::wstring_view { L" \t" }) == value.end()) { return value; }
+
+    constexpr std::wstring_view quote { L"\"" };
+    const std::array parts { quote, std::wstring_view { value }, quote };
+    const auto joined_view { parts | std::views::join };
+
+    return std::wstring(joined_view.begin(), joined_view.end());
 }
 
 [[nodiscard]] std::wstring make_output_line(std::wstring_view name, const SearchResult& result, bool quiet) {
