@@ -49,6 +49,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 #include <vector>
 #include <windows.h>
@@ -167,16 +168,70 @@ concept SearchBackend = requires(const T& backend, const SearchRequest& request)
     { backend.find(request) } -> std::same_as<std::vector<fs::path>>;
 };
 
-[[nodiscard]] std::wstring_view trim_view(std::wstring_view value) noexcept {
-    constexpr std::wstring_view whitespace { L" \t\r\n" };
-    const auto first = value.find_first_not_of(whitespace);
-    if (first == std::wstring_view::npos) { return {}; }
-    const auto last = value.find_last_not_of(whitespace);
-    return value.substr(first, last - first + 1);
-}
+template <typename T>
+concept TrimViewSource = std::is_lvalue_reference_v<T> || std::ranges::borrowed_range<std::remove_cvref_t<T>>;
+
+class StringUtils final {
+public:
+    StringUtils() = delete;
+
+    static constexpr std::string_view trim_sv(std::nullptr_t) = delete;
+
+    template <typename T>
+        requires std::constructible_from<std::string_view, T> && TrimViewSource<T>
+    [[nodiscard]] static constexpr std::string_view trim_sv(T&& str) {
+        return trim_impl(make_view<std::string_view>(std::forward<T>(str)));
+    }
+
+    template <typename T>
+        requires std::constructible_from<std::wstring_view, T> && TrimViewSource<T>
+    [[nodiscard]] static constexpr std::wstring_view trim_sv(T&& str) {
+        return trim_impl(make_view<std::wstring_view>(std::forward<T>(str)));
+    }
+
+    static constexpr std::string trim(std::nullptr_t) = delete;
+
+    template <typename T>
+        requires std::constructible_from<std::string_view, T>
+    [[nodiscard]] static constexpr std::string trim(T&& str) {
+        return std::string { trim_impl(make_view<std::string_view>(std::forward<T>(str))) };
+    }
+
+    template <typename T>
+        requires std::constructible_from<std::wstring_view, T>
+    [[nodiscard]] static constexpr std::wstring trim(T&& str) {
+        return std::wstring { trim_impl(make_view<std::wstring_view>(std::forward<T>(str))) };
+    }
+
+private:
+    template <typename View, typename T>
+        requires(!std::is_pointer_v<std::remove_cvref_t<T>>)
+    [[nodiscard]] static constexpr View make_view(T&& source) {
+        return View { std::forward<T>(source) };
+    }
+
+    template <typename View, typename T>
+        requires std::is_pointer_v<std::remove_cvref_t<T>>
+    [[nodiscard]] static constexpr View make_view(T&& source) {
+        return source != nullptr ? View { source } : View {};
+    }
+
+    template <typename CharT> [[nodiscard]] static constexpr bool is_space(CharT ch) noexcept {
+        return ch == CharT { ' ' } || ch == CharT { '\n' } || ch == CharT { '\r' } || ch == CharT { '\t' }
+        || ch == CharT { '\v' } || ch == CharT { '\f' };
+    }
+
+    template <typename CharT>
+    [[nodiscard]] static constexpr std::basic_string_view<CharT> trim_impl(std::basic_string_view<CharT> sv) noexcept {
+        const auto first = std::ranges::find_if_not(sv, is_space<CharT>);
+        if (first == sv.end()) { return {}; }
+        const auto last = std::ranges::find_if_not(sv | std::views::reverse, is_space<CharT>).base();
+        return { first, last };
+    }
+};
 
 [[nodiscard]] std::wstring unquote(std::wstring value) {
-    value = std::wstring { trim_view(value) };
+    value = StringUtils::trim(value);
     if (value.size() >= 2 && value.front() == L'"' && value.back() == L'"') {
         value = value.substr(1, value.size() - 2);
     }
@@ -286,7 +341,8 @@ public:
     void add_list(std::wstring_view value) {
         for (const auto& segment : value | std::views::split(L';')) {
             const std::wstring part { segment.begin(), segment.end() };
-            if (!trim_view(part).empty()) { add(std::wstring_view { part }); }
+            const auto trimmed = StringUtils::trim_sv(part);
+            if (!trimmed.empty()) { add(trimmed); }
         }
     }
 
@@ -916,6 +972,20 @@ template <SearchBackend Binary, SearchBackend Manual, SearchBackend Source>
     return line;
 }
 
+class ConsoleModeRestorer final {
+public:
+    ConsoleModeRestorer(HANDLE handle, DWORD original) noexcept
+        : handle_ { handle }
+        , original_ { original } {}
+    ~ConsoleModeRestorer() { SetConsoleMode(handle_, original_); }
+    ConsoleModeRestorer(const ConsoleModeRestorer&)            = delete;
+    ConsoleModeRestorer& operator=(const ConsoleModeRestorer&) = delete;
+
+private:
+    HANDLE handle_;
+    DWORD original_;
+};
+
 class ConsoleOutput {
 public:
     static void stdout_text(std::wstring_view text) { write(GetStdHandle(STD_OUTPUT_HANDLE), text); }
@@ -932,17 +1002,31 @@ private:
 
         DWORD mode {};
         if (GetConsoleMode(handle, &mode)) {
-            emit(ConsoleSink {}, handle, text);
+            emit(ConsoleSink {}, handle, text, mode);
         } else {
             emit(RedirectedSink {}, handle, text);
         }
     }
 
-    static void emit(ConsoleSink, HANDLE handle, std::wstring_view text) {
-        const std::wstring converted = with_crlf(text);
-        write_all<wchar_t>(converted, console_chunk, [handle](const wchar_t* data, DWORD count, DWORD* written) {
+    static void write_console(HANDLE handle, std::wstring_view text) {
+        write_all<wchar_t>(text, console_chunk, [handle](const wchar_t* data, DWORD count, DWORD* written) {
             return WriteConsoleW(handle, data, count, written, nullptr);
         });
+    }
+
+    static void emit(ConsoleSink, HANDLE handle, std::wstring_view text, DWORD mode) {
+        const DWORD forced = (mode | ENABLE_PROCESSED_OUTPUT) & ~DISABLE_NEWLINE_AUTO_RETURN;
+
+        if (forced == mode) {
+            write_console(handle, text);
+            return;
+        }
+        if (!SetConsoleMode(handle, forced)) {
+            write_console(handle, with_crlf(text));
+            return;
+        }
+        const ConsoleModeRestorer restore { handle, mode };
+        write_console(handle, text);
     }
 
     static void emit(RedirectedSink, HANDLE handle, std::wstring_view text) {
@@ -965,7 +1049,8 @@ private:
         }
     }
 
-    // WriteConsoleW does not translate LF to CRLF.
+    // Fallback when SetConsoleMode fails: the console is assumed to be in a
+    // non-default state where LF does not return to column zero, so prepend CR.
     static std::wstring with_crlf(std::wstring_view text) {
         std::wstring result;
         result.reserve(text.size() + 8);

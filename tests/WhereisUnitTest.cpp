@@ -110,9 +110,32 @@ struct FixedSearcher {
 };
 
 TEST(StringHelpers, TrimViewRemovesOuterWhitespace) {
-    EXPECT_EQ(trim_view(L" \talpha beta\r\n"), L"alpha beta");
-    EXPECT_TRUE(trim_view(L" \t\r\n").empty());
-    EXPECT_EQ(trim_view(L"alpha beta"), L"alpha beta");
+    EXPECT_EQ(StringUtils::trim_sv(L" \talpha beta\r\n"), L"alpha beta");
+    EXPECT_TRUE(StringUtils::trim_sv(L" \t\r\n").empty());
+    EXPECT_EQ(StringUtils::trim_sv(L"alpha beta"), L"alpha beta");
+    EXPECT_EQ(StringUtils::trim_sv(L"\v\fhello\v\f"), L"hello");
+}
+
+TEST(StringHelpers, TrimOwnedMatchesViewVariant) {
+    const std::wstring source = L"  hello  ";
+    EXPECT_EQ(StringUtils::trim(source), L"hello");
+    EXPECT_EQ(StringUtils::trim_sv(source), L"hello");
+    EXPECT_EQ(StringUtils::trim(std::wstring { L"  x  " }), L"x");
+}
+
+TEST(StringUtilsConcept, TrimViewSourceAcceptsLvaluesAndBorrowedRvalues) {
+    static_assert(TrimViewSource<std::wstring&>);
+    static_assert(TrimViewSource<const std::wstring&>);
+    static_assert(TrimViewSource<std::wstring_view>);
+    static_assert(TrimViewSource<const wchar_t(&)[8]>);
+    static_assert(!TrimViewSource<std::wstring>);
+    static_assert(!TrimViewSource<const wchar_t*>);
+    static_assert(TrimViewSource<const wchar_t*&>); 
+}
+
+TEST(StringUtilsConcept, StringIsConstructibleToView) {
+    static_assert(std::constructible_from<std::wstring_view, std::wstring&>);
+    static_assert(std::constructible_from<std::wstring_view, const std::wstring&>);
 }
 
 TEST(StringHelpers, UnquoteTrimsAndRemovesMatchingQuotes) {
