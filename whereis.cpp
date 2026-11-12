@@ -747,29 +747,49 @@ public:
         , extensions_ { path_extensions() } {}
 
     [[nodiscard]] std::vector<fs::path> find(const SearchRequest& request) const {
-        std::vector<fs::path> matches;
-        const fs::path requested { request.name };
-        std::vector<fs::path> file_names;
+        const auto file_names { build_file_names(request.name) };
+
+        auto matches { std::vector<fs::path> {} };
+
+        search_path_directories(file_names, request.all, matches);
+        if (!request.all && !matches.empty()) { return matches; }
+
+        search_registry_app_paths(file_names, request.all, matches);
+        return matches;
+    }
+
+private:
+    [[nodiscard]] std::vector<fs::path> build_file_names(std::wstring_view name) const {
+        const fs::path requested { name };
 
         if (requested.has_extension() && is_executable_extension(requested.extension().native())) {
-            file_names.push_back(requested);
-        } else {
-            for (const auto& extension : extensions_) {
-                file_names.emplace_back(std::wstring { request.name } + extension);
-            }
+            return { requested };
         }
 
-        // Resolve exactly like a PATH lookup: directory order first, then PATHEXT.
+        auto file_names { std::vector<fs::path> {} };
+        file_names.reserve(extensions_.size());
+        for (const auto& extension : extensions_) {
+            file_names.emplace_back(std::wstring { name } + extension);
+        }
+        return file_names;
+    }
+
+    // Resolve exactly like a PATH lookup: directory order first, then PATHEXT.
+    void search_path_directories(
+        const std::vector<fs::path>& file_names, bool all, std::vector<fs::path>& matches) const {
         for (const auto& directory : directories_) {
             for (const auto& file_name : file_names) {
                 const auto candidate { directory / file_name };
                 if (!is_executable_file(candidate)) { continue; }
                 append_unique_path(matches, canonical_case(candidate));
-                if (!request.all) { return matches; }
+                if (!all) { return; }
             }
         }
+    }
 
-        // App Paths is a ShellExecute/Run-style fallback, never ahead of PATH.
+    // App Paths is a ShellExecute/Run-style fallback, never ahead of PATH.
+    void search_registry_app_paths(
+        const std::vector<fs::path>& file_names, bool all, std::vector<fs::path>& matches) const {
         for (const auto& file_name : file_names) {
             const auto app_path { registry_app_path(file_name.filename().native()) };
             if (!app_path) { continue; }
@@ -777,13 +797,10 @@ public:
             const auto candidate { normalize_path(*app_path) };
             if (!is_executable_file(candidate)) { continue; }
             append_unique_path(matches, canonical_case(candidate));
-            if (!request.all) { return matches; }
+            if (!all) { return; }
         }
-
-        return matches;
     }
 
-private:
     [[nodiscard]] bool is_executable_extension(std::wstring_view extension) const noexcept {
         constexpr std::array native_extensions { std::wstring_view { L".exe" }, std::wstring_view { L".com" },
             std::wstring_view { L".bat" }, std::wstring_view { L".cmd" } };
@@ -810,18 +827,21 @@ public:
         : directories_ { directories.begin(), directories.end() } {}
 
     [[nodiscard]] std::vector<fs::path> find(const SearchRequest& request) const {
-        struct Candidate {
-            fs::path path;
-            bool last_in_group;
-        };
+        return search_layouts(build_candidates(request.name), request.all);
+    }
 
-        const std::wstring name { request.name };
+private:
+    struct Candidate {
+        fs::path path;
+        bool last_in_group;
+    };
 
-        auto matches { std::vector<fs::path> {} };
+    [[nodiscard]] static std::vector<Candidate> build_candidates(std::wstring_view name) {
+        const std::wstring stem_base { name };
         auto candidates { std::vector<Candidate> {} };
 
         for (auto&& [section, suffix] : std::views::cartesian_product(manual_sections, manual_compression_suffixes)) {
-            const auto stem { name + L"." + std::wstring { section } };
+            const auto stem { stem_base + L"." + std::wstring { section } };
             const auto section_name { std::format(L"man{}", section) };
             const auto page { stem + std::wstring { suffix } };
 
@@ -830,21 +850,25 @@ public:
         }
 
         for (const auto extension : document_extensions) {
-            candidates.push_back({ fs::path { name + std::wstring { extension } }, true });
+            candidates.push_back({ fs::path { stem_base + std::wstring { extension } }, true });
         }
 
+        return candidates;
+    }
+
+    [[nodiscard]] std::vector<fs::path> search_layouts(const std::vector<Candidate>& candidates, bool all) const {
+        auto matches { std::vector<fs::path> {} };
         auto layouts { directories_ | std::views::transform(manual_layouts) | std::views::join };
 
+        // Return only after the last candidate in each pair has been checked.
         for (auto&& [layout, candidate] : std::views::cartesian_product(layouts, candidates)) {
             add_if_file(matches, layout / candidate.path);
-
-            if (!request.all && candidate.last_in_group && !matches.empty()) { return matches; }
+            if (!all && candidate.last_in_group && !matches.empty()) { return matches; }
         }
 
         return matches;
     }
 
-private:
     [[nodiscard]] static std::vector<fs::path> manual_layouts(const fs::path& root) {
         return { root, root / L"man", root / L"doc", root / L"docs", root / L"share" / L"man" };
     }
@@ -863,26 +887,33 @@ public:
         : directories_ { directories.begin(), directories.end() } {}
 
     [[nodiscard]] std::vector<fs::path> find(const SearchRequest& request) const {
-        std::vector<fs::path> matches;
+        auto matches { std::vector<fs::path> {} };
 
-        for (const auto& root : directories_) {
-            const auto direct { root / request.name };
-            if (!is_directory_path(direct)) { continue; }
-            append_unique_path(matches, direct);
-            if (!request.all) { return matches; }
-        }
+        search_direct(request.name, request.all, matches);
+        if (!request.all && !matches.empty()) { return matches; }
 
-        if (request.skip_recursive || directories_.empty()) { return matches; }
-
-        for (const auto& root : directories_) {
-            search_tree(root, request.name, request.all, matches);
-            if (!request.all && !matches.empty()) { return matches; }
-        }
+        if (!request.skip_recursive && !directories_.empty()) { search_recursive(request.name, request.all, matches); }
 
         return matches;
     }
 
 private:
+    void search_direct(std::wstring_view name, bool all, std::vector<fs::path>& matches) const {
+        for (const auto& root : directories_) {
+            const auto direct { root / name };
+            if (!is_directory_path(direct)) { continue; }
+            append_unique_path(matches, direct);
+            if (!all) { return; }
+        }
+    }
+
+    void search_recursive(std::wstring_view name, bool all, std::vector<fs::path>& matches) const {
+        for (const auto& root : directories_) {
+            search_tree(root, name, all, matches);
+            if (!all && !matches.empty()) { return; }
+        }
+    }
+
     static void search_tree(const fs::path& root, std::wstring_view name, bool all, std::vector<fs::path>& matches) {
         std::error_code error;
         for (auto current { fs::recursive_directory_iterator {
