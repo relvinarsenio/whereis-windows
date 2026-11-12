@@ -59,11 +59,11 @@ namespace fs = std::filesystem;
 
 namespace {
 
-constexpr int usage_error    = 64;
-constexpr int data_error     = 65;
-constexpr unsigned no_binary = 1u << 0;
-constexpr unsigned no_manual = 1u << 1;
-constexpr unsigned no_source = 1u << 2;
+constexpr int usage_error { 64 };
+constexpr int data_error { 65 };
+constexpr unsigned no_binary { 1u << 0 };
+constexpr unsigned no_manual { 1u << 1 };
+constexpr unsigned no_source { 1u << 2 };
 
 constexpr std::array default_path_extensions { std::wstring_view { L".COM" }, std::wstring_view { L".EXE" },
     std::wstring_view { L".BAT" }, std::wstring_view { L".CMD" }, std::wstring_view { L".VBS" },
@@ -158,10 +158,10 @@ constexpr std::array directory_specs {
     DirectorySpec { L'S', &Options::source_dirs, &Options::custom_source_dirs, L"Override source search directories" },
 };
 
-constexpr wchar_t list_end_letter            = L'f';
-constexpr std::wstring_view list_end_help    = L"Mark the end of directory lists";
-constexpr std::wstring_view options_end      = L"--";
-constexpr std::wstring_view options_end_help = L"Treat all following arguments as program names";
+constexpr wchar_t list_end_letter { L'f' };
+constexpr std::wstring_view list_end_help { L"Mark the end of directory lists" };
+constexpr std::wstring_view options_end { L"--" };
+constexpr std::wstring_view options_end_help { L"Treat all following arguments as program names" };
 
 template <typename T>
 concept SearchBackend = requires(const T& backend, const SearchRequest& request) {
@@ -223,9 +223,9 @@ private:
 
     template <typename CharT>
     [[nodiscard]] static constexpr std::basic_string_view<CharT> trim_impl(std::basic_string_view<CharT> sv) noexcept {
-        const auto first = std::ranges::find_if_not(sv, is_space<CharT>);
+        const auto first { std::ranges::find_if_not(sv, is_space<CharT>) };
         if (first == sv.end()) { return {}; }
-        const auto last = std::ranges::find_if_not(sv | std::views::reverse, is_space<CharT>).base();
+        const auto last { std::ranges::find_if_not(sv | std::views::reverse, is_space<CharT>).base() };
         return { first, last };
     }
 };
@@ -250,11 +250,11 @@ private:
 
 [[nodiscard]] std::optional<std::wstring> environment_value(std::wstring_view name) {
     const std::wstring key { name };
-    const DWORD required = GetEnvironmentVariableW(key.c_str(), nullptr, 0);
+    const DWORD required { GetEnvironmentVariableW(key.c_str(), nullptr, 0) };
     if (required == 0) { return std::nullopt; }
 
     std::wstring value(required, L'\0');
-    const DWORD written = GetEnvironmentVariableW(key.c_str(), value.data(), required);
+    const DWORD written { GetEnvironmentVariableW(key.c_str(), value.data(), required) };
     if (written == 0 || written >= required) { return std::nullopt; }
 
     value.resize(written);
@@ -263,11 +263,11 @@ private:
 
 [[nodiscard]] std::wstring expand_environment(std::wstring_view value) {
     const std::wstring source { value };
-    const DWORD required = ExpandEnvironmentStringsW(source.c_str(), nullptr, 0);
+    const DWORD required { ExpandEnvironmentStringsW(source.c_str(), nullptr, 0) };
     if (required == 0) { return source; }
 
     std::wstring expanded(required, L'\0');
-    const DWORD written = ExpandEnvironmentStringsW(source.c_str(), expanded.data(), required);
+    const DWORD written { ExpandEnvironmentStringsW(source.c_str(), expanded.data(), required) };
     if (written == 0 || written > required) { return source; }
 
     expanded.resize(static_cast<std::size_t>(written) - 1);
@@ -275,17 +275,17 @@ private:
 }
 
 [[nodiscard]] fs::path normalize_path(std::wstring_view raw) {
-    auto value = unquote(std::wstring { raw });
-    value      = expand_environment(value);
+    auto value { unquote(std::wstring { raw }) };
+    value = expand_environment(value);
 
     if (value == L"~" || value.starts_with(L"~\\") || value.starts_with(L"~/")) {
-        if (const auto profile = environment_value(L"USERPROFILE")) { value.replace(0, 1, *profile); }
+        if (const auto profile { environment_value(L"USERPROFILE") }) { value.replace(0, 1, *profile); }
     }
 
     fs::path path { value };
     std::error_code error;
     if (path.is_relative()) {
-        auto absolute = fs::absolute(path, error);
+        auto absolute { fs::absolute(path, error) };
         if (!error) { path = std::move(absolute); }
     }
 
@@ -302,14 +302,14 @@ private:
 }
 
 [[nodiscard]] bool same_path(const fs::path& left, const fs::path& right) {
-    const auto a = without_trailing_separator(left);
-    const auto b = without_trailing_separator(right);
+    const auto a { without_trailing_separator(left) };
+    const auto b { without_trailing_separator(right) };
     return equal_ordinal(a.native(), b.native());
 }
 
 void append_unique_path(std::vector<fs::path>& paths, const fs::path& candidate) {
-    const bool duplicate
-        = std::ranges::any_of(paths, [&candidate](const fs::path& current) { return same_path(current, candidate); });
+    const bool duplicate { std::ranges::any_of(
+        paths, [&candidate](const fs::path& current) { return same_path(current, candidate); }) };
     if (!duplicate) { paths.push_back(candidate); }
 }
 
@@ -326,7 +326,7 @@ void append_unique_path(std::vector<fs::path>& paths, const fs::path& candidate)
 // App Execution Aliases are AppExecLink reparse points. The STL may report
 // their file_type as unknown, while GetFileAttributesW still sees the entry.
 [[nodiscard]] bool is_file_path(const fs::path& path) noexcept {
-    const DWORD attributes = GetFileAttributesW(path.c_str());
+    const DWORD attributes { GetFileAttributesW(path.c_str()) };
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
@@ -341,7 +341,7 @@ public:
     void add_list(std::wstring_view value) {
         for (const auto& segment : value | std::views::split(L';')) {
             const std::wstring part { segment.begin(), segment.end() };
-            const auto trimmed = StringUtils::trim_sv(part);
+            const auto trimmed { StringUtils::trim_sv(part) };
             if (!trimmed.empty()) { add(trimmed); }
         }
     }
@@ -358,24 +358,24 @@ private:
 };
 
 [[nodiscard]] constexpr const FlagSpec* find_flag(wchar_t letter) noexcept {
-    const auto found = std::ranges::find(flag_specs, letter, &FlagSpec::letter);
+    const auto found { std::ranges::find(flag_specs, letter, &FlagSpec::letter) };
     return found == flag_specs.end() ? nullptr : std::to_address(found);
 }
 
 [[nodiscard]] constexpr const FlagSpec* find_long_flag(std::wstring_view argument) noexcept {
-    const auto found = std::ranges::find_if(
-        flag_specs, [argument](const FlagSpec& spec) { return !spec.long_name.empty() && spec.long_name == argument; });
+    const auto found { std::ranges::find_if(flag_specs,
+        [argument](const FlagSpec& spec) { return !spec.long_name.empty() && spec.long_name == argument; }) };
     return found == flag_specs.end() ? nullptr : std::to_address(found);
 }
 
 [[nodiscard]] constexpr const DirectorySpec* find_directory_spec(wchar_t letter) noexcept {
-    const auto found = std::ranges::find(directory_specs, letter, &DirectorySpec::letter);
+    const auto found { std::ranges::find(directory_specs, letter, &DirectorySpec::letter) };
     return found == directory_specs.end() ? nullptr : std::to_address(found);
 }
 
 [[nodiscard]] constexpr bool is_unique_letter(wchar_t letter) noexcept {
-    const auto uses = std::ranges::count(flag_specs, letter, &FlagSpec::letter)
-        + std::ranges::count(directory_specs, letter, &DirectorySpec::letter) + (letter == list_end_letter ? 1 : 0);
+    const auto uses { std::ranges::count(flag_specs, letter, &FlagSpec::letter)
+        + std::ranges::count(directory_specs, letter, &DirectorySpec::letter) + (letter == list_end_letter ? 1 : 0) };
     return uses == 1;
 }
 
@@ -398,7 +398,7 @@ static_assert(all_letters_unique(), "an option letter is used twice");
 [[nodiscard]] bool is_flag_cluster(std::wstring_view argument) noexcept {
     if (argument.size() < 2 || argument.front() != L'-' || argument == options_end) { return false; }
 
-    auto letters = argument.substr(1);
+    auto letters { argument.substr(1) };
     while (letters.size() > 1) {
         if (!is_simple_flag(letters.front())) { return false; }
         letters.remove_prefix(1);
@@ -444,11 +444,11 @@ void take_remaining_as_queries(Options& options, ArgumentIterator& argument, Arg
 [[nodiscard]] std::expected<void, std::wstring> parse_cluster(
     std::wstring_view cluster, Options& options, ArgumentIterator& argument, ArgumentIterator end) {
     for (const wchar_t letter : cluster) {
-        if (const auto* flag = find_flag(letter)) {
+        if (const auto* flag { find_flag(letter) }) {
             options.*flag->member = true;
         } else if (letter == list_end_letter) {
             take_remaining_as_queries(options, argument, end);
-        } else if (const auto* spec = find_directory_spec(letter)) {
+        } else if (const auto* spec { find_directory_spec(letter) }) {
             return read_directory_list(*spec, options, argument, end);
         }
     }
@@ -460,11 +460,11 @@ void take_remaining_as_queries(Options& options, ArgumentIterator& argument, Arg
     Options options;
     bool options_ended {};
 
-    auto argument  = arguments.begin();
-    const auto end = arguments.end();
+    auto argument { arguments.begin() };
+    const auto end { arguments.end() };
 
     while (argument != end) {
-        const auto current = *argument++;
+        const auto current { *argument++ };
 
         if (options_ended) {
             options.queries.emplace_back(current);
@@ -476,7 +476,7 @@ void take_remaining_as_queries(Options& options, ArgumentIterator& argument, Arg
             continue;
         }
 
-        if (const auto* flag = find_long_flag(current)) {
+        if (const auto* flag { find_long_flag(current) }) {
             options.*flag->member = true;
             continue;
         }
@@ -489,7 +489,7 @@ void take_remaining_as_queries(Options& options, ArgumentIterator& argument, Arg
 
         if (!is_flag_cluster(current)) { return std::unexpected(L"Unknown option: " + std::wstring { current }); }
 
-        if (auto parsed = parse_cluster(current.substr(1), options, argument, end); !parsed) {
+        if (auto parsed { parse_cluster(current.substr(1), options, argument, end) }; !parsed) {
             return std::unexpected(std::move(parsed.error()));
         }
     }
@@ -508,21 +508,21 @@ void take_remaining_as_queries(Options& options, ArgumentIterator& argument, Arg
 }
 
 void add_environment_directories(DirectorySet& target, std::wstring_view variable) {
-    if (const auto value = environment_value(variable)) { target.add_list(*value); }
+    if (const auto value { environment_value(variable) }) { target.add_list(*value); }
 }
 
 using WindowsDirectoryGetter = UINT(WINAPI*)(LPWSTR, UINT);
 
 void add_windows_directory(DirectorySet& target, WindowsDirectoryGetter getter) {
     std::wstring buffer(32768, L'\0');
-    const UINT written = getter(buffer.data(), static_cast<UINT>(buffer.size()));
+    const UINT written { getter(buffer.data(), static_cast<UINT>(buffer.size())) };
     if (written == 0 || written >= static_cast<UINT>(buffer.size())) { return; }
     buffer.resize(written);
     target.add(std::wstring_view { buffer });
 }
 
 [[nodiscard]] fs::path program_files_path(std::wstring_view variable, std::wstring_view suffix) {
-    const auto root = environment_value(variable);
+    const auto root { environment_value(variable) };
     if (!root) { return {}; }
     return normalize_path((fs::path { *root } / std::wstring { suffix }).native());
 }
@@ -557,7 +557,7 @@ void configure_manual_directories(Options& options) {
 
         for (const auto variable : { std::wstring_view { L"MSYS2_ROOT" }, std::wstring_view { L"CYGWIN_ROOT" },
                  std::wstring_view { L"GIT_INSTALL_ROOT" } }) {
-            if (const auto root = environment_value(variable)) {
+            if (const auto root { environment_value(variable) }) {
                 directories.add_existing(fs::path { *root } / L"usr" / L"share" / L"man");
             }
         }
@@ -576,11 +576,11 @@ void configure_source_directories(Options& options) {
     add_environment_directories(directories, L"SRCPATH");
     add_environment_directories(directories, L"PORTSDIR");
 
-    if (const auto vcpkg = environment_value(L"VCPKG_ROOT")) {
+    if (const auto vcpkg { environment_value(L"VCPKG_ROOT") }) {
         directories.add_existing(fs::path { *vcpkg } / L"ports");
     }
 
-    if (const auto profile = environment_value(L"USERPROFILE")) {
+    if (const auto profile { environment_value(L"USERPROFILE") }) {
         const fs::path home { *profile };
         directories.add_existing(home / L"source");
         directories.add_existing(home / L"source" / L"repos");
@@ -591,7 +591,7 @@ void configure_source_directories(Options& options) {
         directories.add_existing(home / L"Documents" / L"Visual Studio 2026" / L"Projects");
     }
 
-    if (const auto system_drive = environment_value(L"SystemDrive")) {
+    if (const auto system_drive { environment_value(L"SystemDrive") }) {
         directories.add_existing(fs::path { *system_drive } / L"src");
         directories.add_existing(fs::path { *system_drive } / L"source");
     }
@@ -633,7 +633,7 @@ void configure_directories(Options& options) {
 
 [[nodiscard]] std::vector<std::wstring> path_extensions() {
     std::vector<std::wstring> result;
-    const auto value = environment_value(L"PATHEXT");
+    const auto value { environment_value(L"PATHEXT") };
     if (!value) {
         for (const auto extension : default_path_extensions) {
             result.emplace_back(extension);
@@ -642,7 +642,7 @@ void configure_directories(Options& options) {
     }
 
     for (const auto& segment : *value | std::views::split(L';')) {
-        auto extension = unquote(std::wstring { segment.begin(), segment.end() });
+        auto extension { unquote(std::wstring { segment.begin(), segment.end() }) };
         if (extension.empty()) { continue; }
         if (extension.front() != L'.') { extension.insert(extension.begin(), L'.'); }
         if (std::ranges::none_of(
@@ -656,7 +656,7 @@ void configure_directories(Options& options) {
 
 [[nodiscard]] fs::path canonical_case(const fs::path& path) {
     std::wstring buffer(MAX_PATH, L'\0');
-    DWORD written = GetLongPathNameW(path.c_str(), buffer.data(), static_cast<DWORD>(buffer.size()));
+    DWORD written { GetLongPathNameW(path.c_str(), buffer.data(), static_cast<DWORD>(buffer.size())) };
 
     if (written == 0) { return path; }
     if (written >= buffer.size()) {
@@ -689,12 +689,12 @@ private:
 
 [[nodiscard]] std::optional<std::wstring> registry_app_path(std::wstring_view executable_name) {
     constexpr std::wstring_view key_prefix { L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\" };
-    const std::wstring key_name = std::wstring { key_prefix } + std::wstring { executable_name };
+    const std::wstring key_name { std::wstring { key_prefix } + std::wstring { executable_name } };
 
     const std::array registry_roots { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE };
     constexpr std::array<REGSAM, 2> registry_views { static_cast<REGSAM>(KEY_WOW64_64KEY),
         static_cast<REGSAM>(KEY_WOW64_32KEY) };
-    constexpr DWORD wchar_size = static_cast<DWORD>(sizeof(wchar_t));
+    constexpr DWORD wchar_size { static_cast<DWORD>(sizeof(wchar_t)) };
 
     for (const auto root : registry_roots) {
         for (const REGSAM view : registry_views) {
@@ -706,23 +706,24 @@ private:
             const RegistryKey key { raw_key };
             DWORD type {};
             DWORD bytes {};
-            const LONG size_status = RegQueryValueExW(key.get(), nullptr, nullptr, &type, nullptr, &bytes);
+            const LONG size_status { RegQueryValueExW(key.get(), nullptr, nullptr, &type, nullptr, &bytes) };
 
             if (size_status != ERROR_SUCCESS || bytes < wchar_size || bytes > 65536 || bytes % wchar_size != 0) {
                 continue;
             }
 
-            const DWORD buffer_size = bytes;
+            const DWORD buffer_size { bytes };
             std::vector<BYTE> storage(buffer_size);
-            DWORD read_bytes = buffer_size;
+            DWORD read_bytes { buffer_size };
 
-            const LONG read_status = RegQueryValueExW(key.get(), nullptr, nullptr, &type, storage.data(), &read_bytes);
+            const LONG read_status { RegQueryValueExW(
+                key.get(), nullptr, nullptr, &type, storage.data(), &read_bytes) };
 
             if (read_status != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) { continue; }
 
             if (read_bytes < wchar_size || read_bytes > buffer_size || read_bytes % wchar_size != 0) { continue; }
 
-            const auto character_count = static_cast<std::size_t>(read_bytes / wchar_size);
+            const auto character_count { static_cast<std::size_t>(read_bytes / wchar_size) };
             std::wstring value(character_count, L'\0');
             std::memcpy(value.data(), storage.data(), static_cast<std::size_t>(read_bytes));
 
@@ -761,7 +762,7 @@ public:
         // Resolve exactly like a PATH lookup: directory order first, then PATHEXT.
         for (const auto& directory : directories_) {
             for (const auto& file_name : file_names) {
-                const auto candidate = directory / file_name;
+                const auto candidate { directory / file_name };
                 if (!is_executable_file(candidate)) { continue; }
                 append_unique_path(matches, canonical_case(candidate));
                 if (!request.all) { return matches; }
@@ -770,10 +771,10 @@ public:
 
         // App Paths is a ShellExecute/Run-style fallback, never ahead of PATH.
         for (const auto& file_name : file_names) {
-            const auto app_path = registry_app_path(file_name.filename().native());
+            const auto app_path { registry_app_path(file_name.filename().native()) };
             if (!app_path) { continue; }
 
-            const auto candidate = normalize_path(*app_path);
+            const auto candidate { normalize_path(*app_path) };
             if (!is_executable_file(candidate)) { continue; }
             append_unique_path(matches, canonical_case(candidate));
             if (!request.all) { return matches; }
@@ -809,28 +810,35 @@ public:
         : directories_ { directories.begin(), directories.end() } {}
 
     [[nodiscard]] std::vector<fs::path> find(const SearchRequest& request) const {
-        std::vector<fs::path> matches;
+        struct Candidate {
+            fs::path path;
+            bool last_in_group;
+        };
 
-        for (const auto& root : directories_) {
-            for (const auto& layout : manual_layouts(root)) {
-                for (const auto section : manual_sections) {
-                    const auto stem   = std::wstring { request.name } + L"." + std::wstring { section };
-                    auto section_name = std::wstring { L"man" };
-                    section_name.append(section);
-                    const auto section_directory = layout / section_name;
-                    for (const auto suffix : manual_compression_suffixes) {
-                        const auto page = stem + std::wstring { suffix };
-                        add_if_file(matches, section_directory / page);
-                        add_if_file(matches, layout / page);
-                        if (!request.all && !matches.empty()) { return matches; }
-                    }
-                }
+        const std::wstring name { request.name };
 
-                for (const auto extension : document_extensions) {
-                    add_if_file(matches, layout / (std::wstring { request.name } + std::wstring { extension }));
-                    if (!request.all && !matches.empty()) { return matches; }
-                }
-            }
+        auto matches { std::vector<fs::path> {} };
+        auto candidates { std::vector<Candidate> {} };
+
+        for (auto&& [section, suffix] : std::views::cartesian_product(manual_sections, manual_compression_suffixes)) {
+            const auto stem { name + L"." + std::wstring { section } };
+            const auto section_name { std::format(L"man{}", section) };
+            const auto page { stem + std::wstring { suffix } };
+
+            candidates.push_back({ fs::path { section_name } / page, false });
+            candidates.push_back({ fs::path { page }, true });
+        }
+
+        for (const auto extension : document_extensions) {
+            candidates.push_back({ fs::path { name + std::wstring { extension } }, true });
+        }
+
+        auto layouts { directories_ | std::views::transform(manual_layouts) | std::views::join };
+
+        for (auto&& [layout, candidate] : std::views::cartesian_product(layouts, candidates)) {
+            add_if_file(matches, layout / candidate.path);
+
+            if (!request.all && candidate.last_in_group && !matches.empty()) { return matches; }
         }
 
         return matches;
@@ -858,7 +866,7 @@ public:
         std::vector<fs::path> matches;
 
         for (const auto& root : directories_) {
-            const auto direct = root / request.name;
+            const auto direct { root / request.name };
             if (!is_directory_path(direct)) { continue; }
             append_unique_path(matches, direct);
             if (!request.all) { return matches; }
@@ -877,13 +885,13 @@ public:
 private:
     static void search_tree(const fs::path& root, std::wstring_view name, bool all, std::vector<fs::path>& matches) {
         std::error_code error;
-        for (auto current
-            = fs::recursive_directory_iterator { root, fs::directory_options::skip_permission_denied, error },
-            end = fs::recursive_directory_iterator {};
+        for (auto current { fs::recursive_directory_iterator {
+                 root, fs::directory_options::skip_permission_denied, error } },
+            end { fs::recursive_directory_iterator {} };
             !error && current != end; current.increment(error)) {
-            const auto& entry_path = current->path();
+            const auto& entry_path { current->path() };
             std::error_code type_error;
-            const bool directory = current->is_directory(type_error);
+            const bool directory { current->is_directory(type_error) };
 
             if (should_prune(entry_path.filename())) { current.disable_recursion_pending(); }
 
@@ -895,7 +903,7 @@ private:
     }
 
     [[nodiscard]] static bool should_prune(const fs::path& directory) noexcept {
-        const auto& name = directory.native();
+        const auto& name { directory.native() };
         constexpr std::array ignored { std::wstring_view { L".git" }, std::wstring_view { L".hg" },
             std::wstring_view { L".svn" }, std::wstring_view { L".vs" }, std::wstring_view { L".cache" },
             std::wstring_view { L"node_modules" }, std::wstring_view { L"packages" }, std::wstring_view { L"build" },
@@ -995,7 +1003,7 @@ private:
     struct ConsoleSink {};
     struct RedirectedSink {};
 
-    static constexpr DWORD console_chunk = 32768;
+    static constexpr DWORD console_chunk { 32768 };
 
     static void write(HANDLE handle, std::wstring_view text) {
         if (handle == nullptr || handle == INVALID_HANDLE_VALUE || text.empty()) { return; }
@@ -1015,7 +1023,7 @@ private:
     }
 
     static void emit(ConsoleSink, HANDLE handle, std::wstring_view text, DWORD mode) {
-        const DWORD forced = (mode | ENABLE_PROCESSED_OUTPUT) & ~DISABLE_NEWLINE_AUTO_RETURN;
+        const DWORD forced { (mode | ENABLE_PROCESSED_OUTPUT) & ~DISABLE_NEWLINE_AUTO_RETURN };
 
         if (forced == mode) {
             write_console(handle, text);
@@ -1030,7 +1038,7 @@ private:
     }
 
     static void emit(RedirectedSink, HANDLE handle, std::wstring_view text) {
-        const std::string bytes = to_utf8(text);
+        const std::string bytes { to_utf8(text) };
         write_all<char>(bytes, MAXDWORD, [handle](const char* data, DWORD count, DWORD* written) {
             return WriteFile(handle, data, count, written, nullptr);
         });
@@ -1066,13 +1074,13 @@ private:
     // Flags = 0 replaces invalid UTF-16 sequences with U+FFFD.
     // WideCharToMultiByte accepts an int source length.
     static std::string to_utf8(std::wstring_view text) {
-        const int length   = static_cast<int>(std::min<std::size_t>(text.size(), INT_MAX));
-        const int required = WideCharToMultiByte(CP_UTF8, 0, text.data(), length, nullptr, 0, nullptr, nullptr);
+        const int length { static_cast<int>(std::min<std::size_t>(text.size(), INT_MAX)) };
+        const int required { WideCharToMultiByte(CP_UTF8, 0, text.data(), length, nullptr, 0, nullptr, nullptr) };
         if (required <= 0) { return {}; }
 
         std::string utf8(static_cast<std::size_t>(required), '\0');
-        const int converted
-            = WideCharToMultiByte(CP_UTF8, 0, text.data(), length, utf8.data(), required, nullptr, nullptr);
+        const int converted { WideCharToMultiByte(
+            CP_UTF8, 0, text.data(), length, utf8.data(), required, nullptr, nullptr) };
         return converted > 0 ? utf8 : std::string {};
     }
 };
@@ -1086,8 +1094,8 @@ template <std::ranges::input_range Parts> [[nodiscard]] std::wstring join_text(P
 }
 
 [[nodiscard]] std::wstring directory_usage_part(const DirectorySpec& spec) {
-    const std::wstring terminator
-        = &spec == &directory_specs.back() ? std::format(L" -{}", list_end_letter) : std::wstring {};
+    const std::wstring terminator { &spec == &directory_specs.back() ? std::format(L" -{}", list_end_letter)
+                                                                     : std::wstring {} };
     return std::format(L" [-{} dir ...{}]", spec.letter, terminator);
 }
 
@@ -1100,8 +1108,8 @@ template <std::ranges::input_range Parts> [[nodiscard]] std::wstring join_text(P
 }
 
 [[nodiscard]] std::wstring flag_help_part(const FlagSpec& flag) {
-    const auto label = flag.long_name.empty() ? std::format(L"-{}", flag.letter)
-                                              : std::format(L"-{}, {}", flag.letter, flag.long_name);
+    const auto label { flag.long_name.empty() ? std::format(L"-{}", flag.letter)
+                                              : std::format(L"-{}, {}", flag.letter, flag.long_name) };
     return help_line(label, flag.help, !flag.long_name.empty());
 }
 
@@ -1114,12 +1122,12 @@ template <std::ranges::input_range Parts> [[nodiscard]] std::wstring join_text(P
 }
 
 [[nodiscard]] std::wstring_view help_option_name() noexcept {
-    const auto found = std::ranges::find_if(flag_specs, has_long_name);
+    const auto found { std::ranges::find_if(flag_specs, has_long_name) };
     return found == flag_specs.end() ? std::wstring_view {} : found->long_name;
 }
 
 [[nodiscard]] std::wstring flags_help(HelpPosition position) {
-    const auto in_position = [position](const FlagSpec& flag) { return flag.position == position; };
+    const auto in_position { [position](const FlagSpec& flag) { return flag.position == position; } };
     return join_text(flag_specs | std::views::filter(in_position) | std::views::transform(flag_help_part));
 }
 
@@ -1149,7 +1157,7 @@ template <std::ranges::input_range Parts> [[nodiscard]] std::wstring join_text(P
 }
 
 void print_usage(bool to_stderr = false) {
-    const std::wstring text = usage_text();
+    const std::wstring text { usage_text() };
 
     if (to_stderr) {
         ConsoleOutput::stderr_text(text);
@@ -1187,10 +1195,10 @@ void print_usage(bool to_stderr = false) {
     const SourceSearcher sources { options.source_dirs };
 
     for (const auto& requested : options.queries) {
-        const auto name = normalized_query(requested);
+        const auto name { normalized_query(requested) };
         if (name.empty()) { continue; }
 
-        const auto result = search_one(name, options, binaries, manuals, sources);
+        const auto result { search_one(name, options, binaries, manuals, sources) };
         if (options.unusual && result.missing == 0) { continue; }
 
         ConsoleOutput::stdout_text(make_output_line(name, result, options.quiet));
@@ -1204,21 +1212,21 @@ void print_usage(bool to_stderr = false) {
 #ifndef WHEREIS_UNIT_TEST
 int wmain(int argc, wchar_t* argv[]) {
     std::vector<std::wstring_view> arguments;
-    const auto argument_count = static_cast<std::size_t>(std::max(argc - 1, 0));
+    const auto argument_count { static_cast<std::size_t>(std::max(argc - 1, 0)) };
     const std::span argument_values { argv + 1, argument_count };
     arguments.reserve(argument_values.size());
     for (const auto* argument : argument_values) {
         arguments.emplace_back(argument);
     }
 
-    auto parsed = parse_arguments(arguments);
+    auto parsed { parse_arguments(arguments) };
     if (!parsed) {
         ConsoleOutput::stderr_text(L"whereis: " + parsed.error() + L"\n\n");
         print_usage(true);
         return usage_error;
     }
 
-    auto options = std::move(parsed.value());
+    auto options { std::move(parsed.value()) };
     configure_directories(options);
     return run(options);
 }
