@@ -330,7 +330,7 @@ void append_unique_path(std::vector<fs::path>& paths, const fs::path& candidate)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
-class DirectorySet {
+class DirectorySet final {
 public:
     void add(std::wstring_view value) { add(normalize_path(value)); }
 
@@ -340,8 +340,7 @@ public:
 
     void add_list(std::wstring_view value) {
         for (const auto& segment : value | std::views::split(L';')) {
-            const std::wstring part { segment.begin(), segment.end() };
-            const auto trimmed { StringUtils::trim_sv(part) };
+            const auto trimmed { StringUtils::trim_sv(std::wstring_view { segment }) };
             if (!trimmed.empty()) { add(trimmed); }
         }
     }
@@ -387,7 +386,7 @@ private:
 
 static_assert(all_letters_unique(), "an option letter is used twice");
 
-[[nodiscard]] bool is_simple_flag(wchar_t letter) noexcept {
+[[nodiscard]] constexpr bool is_simple_flag(wchar_t letter) noexcept {
     return find_flag(letter) != nullptr;
 }
 
@@ -398,13 +397,10 @@ static_assert(all_letters_unique(), "an option letter is used twice");
 [[nodiscard]] bool is_flag_cluster(std::wstring_view argument) noexcept {
     if (argument.size() < 2 || argument.front() != L'-' || argument == options_end) { return false; }
 
-    auto letters { argument.substr(1) };
-    while (letters.size() > 1) {
-        if (!is_simple_flag(letters.front())) { return false; }
-        letters.remove_prefix(1);
-    }
-
-    return is_simple_flag(letters.front()) || ends_cluster(letters.front());
+    const auto letters { argument.substr(1) };
+    const auto head { letters.substr(0, letters.size() - 1) };
+    const auto tail { letters.back() };
+    return std::ranges::all_of(head, is_simple_flag) && (is_simple_flag(tail) || ends_cluster(tail));
 }
 
 [[nodiscard]] bool ends_directory_list(std::wstring_view argument) noexcept {
@@ -740,7 +736,7 @@ private:
     return std::nullopt;
 }
 
-class BinarySearcher {
+class BinarySearcher final {
 public:
     explicit BinarySearcher(std::span<const fs::path> directories)
         : directories_ { directories.begin(), directories.end() }
@@ -821,7 +817,7 @@ private:
     std::vector<std::wstring> extensions_;
 };
 
-class ManualSearcher {
+class ManualSearcher final {
 public:
     explicit ManualSearcher(std::span<const fs::path> directories)
         : directories_ { directories.begin(), directories.end() } {}
@@ -881,7 +877,7 @@ private:
     std::vector<fs::path> directories_;
 };
 
-class SourceSearcher {
+class SourceSearcher final {
 public:
     explicit SourceSearcher(std::span<const fs::path> directories)
         : directories_ { directories.begin(), directories.end() } {}
@@ -1025,7 +1021,7 @@ private:
     DWORD original_;
 };
 
-class ConsoleOutput {
+class ConsoleOutput final {
 public:
     static void stdout_text(std::wstring_view text) { write(GetStdHandle(STD_OUTPUT_HANDLE), text); }
     static void stderr_text(std::wstring_view text) { write(GetStdHandle(STD_ERROR_HANDLE), text); }
@@ -1242,13 +1238,10 @@ void print_usage(bool to_stderr = false) {
 
 #ifndef WHEREIS_UNIT_TEST
 int wmain(int argc, wchar_t* argv[]) {
-    std::vector<std::wstring_view> arguments;
     const auto argument_count { static_cast<std::size_t>(std::max(argc - 1, 0)) };
-    const std::span argument_values { argv + 1, argument_count };
-    arguments.reserve(argument_values.size());
-    for (const auto* argument : argument_values) {
-        arguments.emplace_back(argument);
-    }
+    const auto arguments { std::span { argv + 1, argument_count } | std::views::transform([](wchar_t* argument) {
+        return std::wstring_view { argument };
+    }) | std::ranges::to<std::vector>() };
 
     auto parsed { parse_arguments(arguments) };
     if (!parsed) {
