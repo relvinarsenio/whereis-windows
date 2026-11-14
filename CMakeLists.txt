@@ -1,14 +1,24 @@
 cmake_minimum_required(VERSION 3.25)
 
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 project(whereis
     DESCRIPTION "A Windows-native implementation of the BSD whereis utility"
     LANGUAGES CXX
 )
 
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+if(NOT WIN32 OR NOT CMAKE_HOST_WIN32)
+    message(FATAL_ERROR
+        "whereis is a Windows-native program and must be built on Windows.")
+endif()
 
-if(NOT WIN32)
-    message(FATAL_ERROR "whereis is a Windows-native program and must be built on Windows.")
+if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" OR
+        (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
+         CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")))
+    message(FATAL_ERROR
+        "Unsupported compiler: ${CMAKE_CXX_COMPILER_ID} "
+        "(frontend: ${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}). "
+        "Supported compilers are MSVC (cl.exe) and Clang-CL (clang-cl.exe).")
 endif()
 
 include(CheckIPOSupported)
@@ -48,31 +58,22 @@ target_compile_definitions(whereis_compiler_flags INTERFACE
     WIN32_LEAN_AND_MEAN
 )
 
-if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+target_compile_options(whereis_compiler_flags INTERFACE
+    /W4
+    /permissive-
+    /utf-8
+    /EHsc
+)
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_compile_options(whereis_compiler_flags INTERFACE
-        /W4
-        /permissive-
         /Zc:__cplusplus
         /Zc:preprocessor
-        /utf-8
-        /EHsc
     )
-    if(WHEREIS_WARNINGS_AS_ERRORS)
-        target_compile_options(whereis_compiler_flags INTERFACE /WX)
-    endif()
-else()
-    target_compile_options(whereis_compiler_flags INTERFACE
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Wconversion
-        -Wsign-conversion
-        -Wshadow
-        -Wformat=2
-    )
-    if(WHEREIS_WARNINGS_AS_ERRORS)
-        target_compile_options(whereis_compiler_flags INTERFACE -Werror)
-    endif()
+endif()
+
+if(WHEREIS_WARNINGS_AS_ERRORS)
+    target_compile_options(whereis_compiler_flags INTERFACE /WX)
 endif()
 
 set(WHEREIS_PCH_HEADERS
@@ -89,64 +90,64 @@ set(WHEREIS_PCH_HEADERS
 add_executable(whereis whereis.cpp)
 add_executable(whereis::whereis ALIAS whereis)
 
-target_link_libraries(whereis PRIVATE whereis_compiler_flags Advapi32)
+target_link_libraries(whereis PRIVATE
+    whereis_compiler_flags
+    Advapi32
+)
+
 target_precompile_headers(whereis PRIVATE ${WHEREIS_PCH_HEADERS})
 
 set_target_properties(whereis PROPERTIES
-    CXX_STANDARD 23
-    CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO
-    OUTPUT_NAME whereis
 )
 
-if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-    if(WHEREIS_ENABLE_HARDENING)
-        target_compile_options(whereis PRIVATE /sdl /guard:cf)
-        target_link_options(whereis PRIVATE
-            /DYNAMICBASE
-            /NXCOMPAT
-            /GUARD:CF
-        )
-    endif()
-
-    target_compile_options(whereis PRIVATE
-        "$<$<CONFIG:Release>:/Gw>"
-    )
-
-    if(MSVC_VERSION GREATER_EQUAL 1935)
-        target_compile_options(whereis PRIVATE
-            "$<$<CONFIG:Release>:/Zc:checkGwOdr>"
-        )
-    endif()
-
+if(WHEREIS_ENABLE_HARDENING)
+    target_compile_options(whereis PRIVATE /guard:cf)
     target_link_options(whereis PRIVATE
-        "$<$<CONFIG:Release>:/OPT:REF>"
-        "$<$<CONFIG:Release>:/OPT:ICF>"
-    )
-else()
-    if(WHEREIS_ENABLE_HARDENING)
-        target_compile_options(whereis PRIVATE
-            "$<$<CONFIG:Release>:-fstack-protector-strong>"
-        )
-    endif()
-
-    target_compile_options(whereis PRIVATE
-        "$<$<CONFIG:Release>:-ffunction-sections>"
-        "$<$<CONFIG:Release>:-fdata-sections>"
-    )
-    target_link_options(whereis PRIVATE
-        "$<$<CONFIG:Release>:-Wl,--gc-sections>"
+        /DYNAMICBASE
+        /NXCOMPAT
+        /GUARD:CF
     )
 endif()
 
+if(WHEREIS_ENABLE_HARDENING AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    target_compile_options(whereis PRIVATE /sdl)
+endif()
+
+target_compile_options(whereis PRIVATE
+    "$<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:/Gw>"
+)
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND MSVC_VERSION GREATER_EQUAL 1935)
+    target_compile_options(whereis PRIVATE
+        "$<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:/Zc:checkGwOdr>"
+    )
+endif()
+
+target_link_options(whereis PRIVATE
+    "$<$<CONFIG:Release,RelWithDebInfo,MinSizeRel>:/OPT:REF>"
+    "$<$<CONFIG:Release,MinSizeRel>:/OPT:ICF>"
+    "$<$<CONFIG:RelWithDebInfo>:/OPT:NOICF>"
+)
+
 if(WHEREIS_ENABLE_IPO)
-    check_ipo_supported(RESULT WHEREIS_IPO_SUPPORTED OUTPUT WHEREIS_IPO_DIAGNOSTIC LANGUAGES CXX)
-    if(WHEREIS_IPO_SUPPORTED)
-        set_property(TARGET whereis PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-        set_property(TARGET whereis PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
-    else()
-        message(STATUS "IPO/LTO is unavailable; optimized builds will use the compiler's normal optimization: ${WHEREIS_IPO_DIAGNOSTIC}")
-    endif()
+    check_ipo_supported(
+        RESULT WHEREIS_IPO_SUPPORTED
+        OUTPUT WHEREIS_IPO_DIAGNOSTIC
+        LANGUAGES CXX
+    )
+endif()
+
+if(WHEREIS_ENABLE_IPO AND WHEREIS_IPO_SUPPORTED)
+    set_property(TARGET whereis PROPERTY
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    set_property(TARGET whereis PROPERTY
+        INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
+endif()
+
+if(WHEREIS_ENABLE_IPO AND NOT WHEREIS_IPO_SUPPORTED)
+    message(STATUS
+        "IPO/LTO is unavailable; optimized builds will use the compiler's normal optimization: ${WHEREIS_IPO_DIAGNOSTIC}")
 endif()
 
 install(TARGETS whereis
@@ -176,15 +177,26 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(googletest)
 
     add_executable(whereis_unicode_test tests/UnicodeTest.cpp)
-    target_link_libraries(whereis_unicode_test PRIVATE whereis_compiler_flags GTest::gtest_main)
+
+    target_link_libraries(whereis_unicode_test PRIVATE
+        whereis_compiler_flags
+        GTest::gtest_main
+    )
+
     target_precompile_headers(whereis_unicode_test PRIVATE ${WHEREIS_PCH_HEADERS})
 
     add_executable(whereis_unit_test tests/WhereisUnitTest.cpp)
-    target_link_libraries(whereis_unit_test PRIVATE whereis_compiler_flags GTest::gtest_main Advapi32)
+
+    target_link_libraries(whereis_unit_test PRIVATE
+        whereis_compiler_flags
+        GTest::gtest_main
+        Advapi32
+    )
+
     target_precompile_headers(whereis_unit_test PRIVATE ${WHEREIS_PCH_HEADERS})
 
     include(GoogleTest)
-    
+
     gtest_discover_tests(whereis_unit_test
         DISCOVERY_TIMEOUT 15
         PROPERTIES
