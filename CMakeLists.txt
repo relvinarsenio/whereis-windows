@@ -185,6 +185,7 @@ if(BUILD_TESTING)
 
     target_precompile_headers(whereis_unicode_test PRIVATE ${WHEREIS_PCH_HEADERS})
 
+    add_dependencies(whereis_unicode_test whereis)
     add_executable(whereis_unit_test tests/WhereisUnitTest.cpp)
 
     target_link_libraries(whereis_unit_test PRIVATE
@@ -194,6 +195,21 @@ if(BUILD_TESTING)
     )
 
     target_precompile_headers(whereis_unit_test PRIVATE ${WHEREIS_PCH_HEADERS})
+
+    add_executable(whereis_acceptance_test
+        tests/WhereisAcceptanceTest.cpp
+    )
+
+    target_link_libraries(whereis_acceptance_test PRIVATE
+        whereis_compiler_flags
+        GTest::gtest_main
+    )
+
+    target_precompile_headers(whereis_acceptance_test PRIVATE
+        ${WHEREIS_PCH_HEADERS}
+    )
+
+    add_dependencies(whereis_acceptance_test whereis)
 
     include(GoogleTest)
 
@@ -213,20 +229,11 @@ if(BUILD_TESTING)
             ENVIRONMENT "WHEREIS_EXE=$<TARGET_FILE:whereis>"
     )
 
-    find_program(WHEREIS_WHERE_EXE NAMES where.exe)
-
-    add_test(
-        NAME whereis.acceptance
-        COMMAND "${CMAKE_COMMAND}"
-            "-DWHEREIS_EXE=$<TARGET_FILE:whereis>"
-            "-DWHEREIS_WHERE_EXE=${WHEREIS_WHERE_EXE}"
-            "-DWHEREIS_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/Testing/whereis"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/WhereisTests.cmake"
-    )
-
-    set_tests_properties(whereis.acceptance PROPERTIES
-        LABELS "windows;acceptance"
-        TIMEOUT 60
-        RUN_SERIAL TRUE
+    gtest_discover_tests(whereis_acceptance_test
+        DISCOVERY_TIMEOUT 15
+        PROPERTIES
+            LABELS "windows;integration;acceptance"
+            TIMEOUT 60
+            ENVIRONMENT "WHEREIS_EXE=$<TARGET_FILE:whereis>"
     )
 endif()

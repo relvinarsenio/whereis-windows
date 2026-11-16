@@ -833,8 +833,12 @@ private:
     };
 
     [[nodiscard]] static std::vector<Candidate> build_candidates(std::wstring_view name) {
+        constexpr std::size_t manual_candidates_per_pair { 2 };
         const std::wstring stem_base { name };
         auto candidates { std::vector<Candidate> {} };
+        candidates.reserve(std::ranges::size(manual_sections) * std::ranges::size(manual_compression_suffixes)
+                * manual_candidates_per_pair
+            + std::ranges::size(document_extensions));
 
         for (auto&& [section, suffix] : std::views::cartesian_product(manual_sections, manual_compression_suffixes)) {
             const auto stem { stem_base + L"." + std::wstring { section } };

@@ -9,99 +9,17 @@
  *
  */
 
+#include "TestSupport.hpp"
+
 #include <array>
-#include <fstream>
 #include <gtest/gtest.h>
 #include <optional>
 #include <string>
-#include <system_error>
 
 #define WHEREIS_UNIT_TEST
 #include "../whereis.cpp"
 
 namespace {
-
-class TemporaryDirectory {
-public:
-    TemporaryDirectory() {
-        std::error_code error;
-        const auto base = fs::temp_directory_path(error);
-        if (error) { throw std::system_error { error, "cannot locate the temporary directory" }; }
-
-        const auto prefix = L"whereis-unit-" + std::to_wstring(GetCurrentProcessId()) + L"-"
-            + std::to_wstring(GetTickCount64()) + L"-";
-
-        for (unsigned int attempt = 0; attempt < 32; ++attempt) {
-            const auto candidate = base / (prefix + std::to_wstring(attempt));
-            error.clear();
-
-            if (fs::create_directory(candidate, error)) {
-                path_ = candidate;
-                return;
-            }
-
-            if (error && error != std::errc::file_exists) {
-                throw std::system_error { error, "cannot create the temporary directory" };
-            }
-        }
-
-        throw std::runtime_error { "could not allocate a unique temporary directory" };
-    }
-
-    TemporaryDirectory(const TemporaryDirectory&)            = delete;
-    TemporaryDirectory& operator=(const TemporaryDirectory&) = delete;
-
-    ~TemporaryDirectory() {
-        std::error_code ignored;
-        fs::remove_all(path_, ignored);
-    }
-
-    [[nodiscard]] const fs::path& path() const noexcept { return path_; }
-
-private:
-    fs::path path_;
-};
-
-void write_file(const fs::path& path) {
-    std::ofstream file { path, std::ios::binary };
-    if (!file) { throw std::runtime_error { "cannot create test file: " + path.string() }; }
-}
-
-[[nodiscard]] std::optional<std::wstring> get_environment(std::wstring_view name) {
-    const std::wstring key { name };
-    const DWORD required = GetEnvironmentVariableW(key.c_str(), nullptr, 0);
-    if (required == 0) { return std::nullopt; }
-
-    std::wstring value(required, L'\0');
-    const DWORD written = GetEnvironmentVariableW(key.c_str(), value.data(), required);
-    if (written == 0 || written >= required) {
-        throw std::system_error { static_cast<int>(GetLastError()), std::system_category(), "GetEnvironmentVariableW" };
-    }
-
-    value.resize(written);
-    return value;
-}
-
-class ScopedEnvironmentVariable {
-public:
-    ScopedEnvironmentVariable(std::wstring name, std::optional<std::wstring> value)
-        : name_ { std::move(name) }
-        , previous_ { get_environment(name_) } {
-        if (!SetEnvironmentVariableW(name_.c_str(), value ? value->c_str() : nullptr)) {
-            throw std::system_error { static_cast<int>(GetLastError()), std::system_category(),
-                "SetEnvironmentVariableW" };
-        }
-    }
-
-    ScopedEnvironmentVariable(const ScopedEnvironmentVariable&)            = delete;
-    ScopedEnvironmentVariable& operator=(const ScopedEnvironmentVariable&) = delete;
-
-    ~ScopedEnvironmentVariable() { SetEnvironmentVariableW(name_.c_str(), previous_ ? previous_->c_str() : nullptr); }
-
-private:
-    std::wstring name_;
-    std::optional<std::wstring> previous_;
-};
 
 struct FixedSearcher {
     std::vector<fs::path> matches;
@@ -130,7 +48,7 @@ TEST(StringUtilsConcept, TrimViewSourceAcceptsLvaluesAndBorrowedRvalues) {
     static_assert(TrimViewSource<const wchar_t(&)[8]>);
     static_assert(!TrimViewSource<std::wstring>);
     static_assert(!TrimViewSource<const wchar_t*>);
-    static_assert(TrimViewSource<const wchar_t*&>); 
+    static_assert(TrimViewSource<const wchar_t*&>);
 }
 
 TEST(StringUtilsConcept, StringIsConstructibleToView) {
@@ -200,7 +118,7 @@ TEST(ArgumentParser, RejectsUnknownOptionsAndMissingDirectories) {
 }
 
 TEST(ArgumentParser, SplitsAndDeduplicatesCustomDirectoryLists) {
-    TemporaryDirectory temporary;
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
     const auto first  = temporary.path() / L"bin";
     const auto second = temporary.path() / L"tools";
     fs::create_directories(first);
@@ -311,7 +229,7 @@ TEST(ArgumentParser, TreatsSingleDashAsProgramName) {
 }
 
 TEST(ArgumentParser, HandlesMultipleDirectorySwitches) {
-    TemporaryDirectory temporary;
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
     const auto bin_dir = temporary.path() / L"bin";
     const auto man_dir = temporary.path() / L"man";
     fs::create_directories(bin_dir);
@@ -332,7 +250,7 @@ TEST(ArgumentParser, HandlesMultipleDirectorySwitches) {
 
 TEST(ArgumentParser, CombinesFlagAndDirectorySwitchInOneCluster) {
     // -aB processes 'a' first, then 'B' consumes the following directories.
-    TemporaryDirectory temporary;
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
     const auto bin_dir = temporary.path() / L"bin";
     fs::create_directories(bin_dir);
 
@@ -349,7 +267,7 @@ TEST(ArgumentParser, CombinesFlagAndDirectorySwitchInOneCluster) {
 }
 
 TEST(ArgumentParser, AccumulatesMultipleBinaryDirectorySwitches) {
-    TemporaryDirectory temporary;
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
     const auto first  = temporary.path() / L"first";
     const auto second = temporary.path() / L"second";
     fs::create_directories(first);
@@ -396,14 +314,14 @@ TEST(ArgumentParser, ClusterEndingWithFClosesTheDirectoryList) {
 }
 
 TEST(EnvironmentHelpers, ParsesAndDeduplicatesPathExtensions) {
-    ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".EXE;.CMD;.exe;BAT" } };
+    TestSupport::ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".EXE;.CMD;.exe;BAT" } };
 
     const auto extensions = path_extensions();
     EXPECT_EQ(extensions, (std::vector<std::wstring> { L".EXE", L".CMD", L".BAT" }));
 }
 
 TEST(EnvironmentHelpers, UsesDefaultPathExtensionsWhenPathextIsUnset) {
-    ScopedEnvironmentVariable pathext { L"PATHEXT", std::nullopt };
+    TestSupport::ScopedEnvironmentVariable pathext { L"PATHEXT", std::nullopt };
 
     const auto extensions = path_extensions();
     ASSERT_EQ(extensions.size(), default_path_extensions.size());
@@ -462,10 +380,10 @@ TEST(SearchOrchestration, SetsMissingBitsForCategoriesWithoutMatches) {
 }
 
 TEST(BinarySearcher, FindsAnExecutableInTheProvidedDirectory) {
-    TemporaryDirectory temporary;
-    ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".EXE" } };
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
+    TestSupport::ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".EXE" } };
     const auto executable = temporary.path() / L"unit-tool.EXE";
-    write_file(executable);
+    TestSupport::write_file(executable);
 
     const std::array directories { temporary.path() };
     const BinarySearcher searcher { std::span<const fs::path> { directories } };
@@ -478,10 +396,10 @@ TEST(BinarySearcher, FindsAnExecutableInTheProvidedDirectory) {
 TEST(BinarySearcher, FindsDottedNameWithAppendedPathext) {
     // A dot in the name (python3.12, tool.v2) does not mean an executable
     // extension is present, so PATHEXT is appended. Matches cmd.exe.
-    TemporaryDirectory temporary;
-    ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".EXE" } };
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
+    TestSupport::ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".EXE" } };
     const auto executable = temporary.path() / L"python3.12.EXE";
-    write_file(executable);
+    TestSupport::write_file(executable);
 
     const std::array directories { temporary.path() };
     const BinarySearcher searcher { std::span<const fs::path> { directories } };
@@ -494,10 +412,10 @@ TEST(BinarySearcher, FindsDottedNameWithAppendedPathext) {
 TEST(BinarySearcher, UsesLiteralWhenExtensionIsInPathext) {
     // An explicit executable extension (tool.exe) is looked up literally,
     // never as tool.exe.EXE.
-    TemporaryDirectory temporary;
-    ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".EXE" } };
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
+    TestSupport::ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".EXE" } };
     const auto executable = temporary.path() / L"tool.EXE";
-    write_file(executable);
+    TestSupport::write_file(executable);
 
     const std::array directories { temporary.path() };
     const BinarySearcher searcher { std::span<const fs::path> { directories } };
@@ -509,12 +427,12 @@ TEST(BinarySearcher, UsesLiteralWhenExtensionIsInPathext) {
 
 TEST(BinarySearcher, RespectsPathextOrderWhenMultipleExtensionsMatch) {
     // With PATHEXT=.COM;.EXE and both files present, .COM wins.
-    TemporaryDirectory temporary;
-    ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".COM;.EXE" } };
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
+    TestSupport::ScopedEnvironmentVariable pathext { L"PATHEXT", std::wstring { L".COM;.EXE" } };
     const auto com_file = temporary.path() / L"unit-tool.COM";
     const auto exe_file = temporary.path() / L"unit-tool.EXE";
-    write_file(com_file);
-    write_file(exe_file);
+    TestSupport::write_file(com_file);
+    TestSupport::write_file(exe_file);
 
     const std::array directories { temporary.path() };
     const BinarySearcher searcher { std::span<const fs::path> { directories } };
@@ -525,11 +443,11 @@ TEST(BinarySearcher, RespectsPathextOrderWhenMultipleExtensionsMatch) {
 }
 
 TEST(ManualSearcher, FindsACompressedSectionedManualPage) {
-    TemporaryDirectory temporary;
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
     const auto page_directory = temporary.path() / L"man1";
     fs::create_directories(page_directory);
     const auto page = page_directory / L"unit-tool.1.gz";
-    write_file(page);
+    TestSupport::write_file(page);
 
     const std::array directories { temporary.path() };
     const ManualSearcher searcher { std::span<const fs::path> { directories } };
@@ -542,9 +460,9 @@ TEST(ManualSearcher, FindsACompressedSectionedManualPage) {
 TEST(ManualSearcher, FindsStandaloneDocument) {
     // Covers the second phase of ManualSearcher::find: loose documents are
     // checked after every section and suffix misses.
-    TemporaryDirectory temporary;
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
     const auto document = temporary.path() / L"unit-tool.md";
-    write_file(document);
+    TestSupport::write_file(document);
 
     const std::array directories { temporary.path() };
     const ManualSearcher searcher { std::span<const fs::path> { directories } };
@@ -555,7 +473,7 @@ TEST(ManualSearcher, FindsStandaloneDocument) {
 }
 
 TEST(SourceSearcher, HandlesDirectRecursiveAndDisabledRecursiveLookup) {
-    TemporaryDirectory temporary;
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
     const auto direct  = temporary.path() / L"unit-direct";
     fs::path recursive = temporary.path();
     for (unsigned int level = 0; level < 10; ++level) {
@@ -583,7 +501,7 @@ TEST(SourceSearcher, HandlesDirectRecursiveAndDisabledRecursiveLookup) {
 TEST(SourceSearcher, PrunesIgnoredDirectories) {
     // .git and other ignored directories are pruned, so matches inside
     // them are not reported.
-    TemporaryDirectory temporary;
+    TestSupport::TemporaryDirectory temporary { L"whereis-unit-" };
     const auto hidden = temporary.path() / L".git" / L"unit-tool";
     fs::create_directories(hidden);
 
